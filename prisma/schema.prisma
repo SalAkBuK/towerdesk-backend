@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String   @id @default(uuid())
+  email            String   @unique
+  passwordHash     String
+  refreshTokenHash String?
+  name             String?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  userRoles        UserRole[]
+  userPermissions  UserPermission[]
+}
+
+model Role {
+  id              String           @id @default(uuid())
+  key             String           @unique
+  name            String
+  description     String?
+  isSystem        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  key             String           @unique
+  name            String
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+enum PermissionEffect {
+  ALLOW
+  DENY
+}
+
+model UserPermission {
+  userId       String
+  permissionId String
+  effect       PermissionEffect
+  createdAt    DateTime   @default(now())
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+}
+
+model BuildingBridge {
+  legacyBuildingId Int          @id
+  legacyAdminId    Int
+  buildingName     String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  units            UnitBridge[]
+
+  @@index([legacyAdminId])
+}
+
+enum UnitBridgeStatus {
+  AVAILABLE
+  OCCUPIED
+  INACTIVE
+}
+
+enum UnitType {
+  apartment
+  flat
+  shop
+}
+
+enum OwnershipType {
+  building
+  other
+}
+
+enum WaterConnectionType {
+  shared
+  separate
+}
+
+enum ParkingType {
+  basement
+  open
+}
+
+enum AreaUnit {
+  sqft
+  sqm
+}
+
+model UnitBridge {
+  id               String            @id @default(uuid())
+  legacyBuildingId Int
+  unitNumberRaw    String
+  unitNumberNorm   String
+  unitType         UnitType
+  floorNumber      String
+  ownershipType    OwnershipType
+  furnished        Boolean?
+  areaSize         Decimal?          @db.Decimal(12, 2)
+  areaUnit         AreaUnit?
+  numberOfRooms    Int?
+  numberOfBedrooms Int?
+  numberOfBathrooms Int?
+  kitchen          Boolean?
+  balcony          Boolean?
+  ownerName        String?
+  ownerCnicOrId    String?
+  ownerContactNumber String?
+  electricityMeterNumber String?
+  gasMeterNumber   String?
+  waterConnectionType WaterConnectionType?
+  monthlyRent      Decimal?          @db.Decimal(12, 2)
+  maintenanceCharges Decimal?        @db.Decimal(12, 2)
+  securityDeposit  Decimal?          @db.Decimal(12, 2)
+  currency         String            @default("PKR")
+  parkingSlotNumber String?
+  parkingType      ParkingType?
+  status           UnitBridgeStatus  @default(AVAILABLE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  building         BuildingBridge    @relation(fields: [legacyBuildingId], references: [legacyBuildingId], onDelete: Cascade)
+  occupancy        OccupancyBridge[]
+
+  @@unique([legacyBuildingId, unitNumberNorm])
+}
+
+model OccupancyBridge {
+  id             String    @id @default(uuid())
+  legacyTenantId Int
+  unitId         String
+  startDate      DateTime
+  endDate        DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  unit           UnitBridge @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@index([legacyTenantId, startDate])
+}
