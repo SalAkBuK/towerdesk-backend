@@ -15,6 +15,7 @@ Common behaviors:
   - READ: STAFF, MANAGER, BUILDING_ADMIN
   - WRITE: BUILDING_ADMIN, or explicit global permission
   - Managers can WRITE on specific endpoints that explicitly allow manager write (e.g., units create, assignments, residents, request assign).
+- Platform superadmin can act in an org by sending `x-org-id: <orgId>` on `/org/*` requests (token `orgId` is null by design).
 
 ## Auth
 
