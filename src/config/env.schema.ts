@@ -32,4 +32,7 @@ export const envSchema = z.object({
   STORAGE_BUCKET: z.string().optional(),
   STORAGE_ACCESS_KEY_ID: z.string().optional(),
   STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
+  PLATFORM_API_KEY: z.string().optional(),
+  PLATFORM_SUPERADMIN_EMAIL: z.string().optional(),
+  PLATFORM_SUPERADMIN_PASSWORD: z.string().optional(),
 });

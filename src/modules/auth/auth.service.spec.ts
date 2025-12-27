@@ -17,6 +17,8 @@ describe('AuthService', () => {
     passwordHash: 'hash',
     refreshTokenHash: null,
     name: null,
+    orgId: null,
+    mustChangePassword: false,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -48,7 +50,7 @@ describe('AuthService', () => {
     authRepo.createUser.mockResolvedValue({
       ...baseUser,
       email: dto.email,
-      name: dto.name,
+      name: dto.name ?? null,
     });
     authRepo.updateRefreshTokenHash.mockResolvedValue(baseUser);
 

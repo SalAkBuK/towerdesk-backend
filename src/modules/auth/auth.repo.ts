@@ -24,4 +24,22 @@ export class AuthRepo {
       data: { refreshTokenHash },
     });
   }
+
+  updatePasswordHash(id: string, passwordHash: string): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash,
+        mustChangePassword: false,
+      },
+    });
+  }
+
+  async getRoleKeys(userId: string): Promise<string[]> {
+    const roles = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: true },
+    });
+    return roles.map((entry) => entry.role.key);
+  }
 }

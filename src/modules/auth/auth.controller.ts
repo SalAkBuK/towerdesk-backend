@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -9,6 +9,9 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { RefreshTokenGuard } from './guards/refresh-token.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { env } from '../../config/env';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { ChangePasswordResponseDto } from './dto/change-password.response.dto';
 
 const authThrottle = {
   default: {
@@ -30,6 +33,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @HttpCode(200)
   @Throttle(authThrottle)
   @ApiOkResponse({ type: AuthResponseDto })
   login(@Body() dto: LoginDto) {
@@ -37,11 +41,28 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @HttpCode(200)
   @Throttle(authThrottle)
   @UseGuards(RefreshTokenGuard)
   @ApiBearerAuth()
   @ApiOkResponse({ type: AuthResponseDto })
   refresh(@CurrentUser('sub') userId: string, @Body() dto: RefreshDto) {
     return this.authService.refresh(userId, dto.refreshToken);
+  }
+
+  @Post('change-password')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: ChangePasswordResponseDto })
+  changePassword(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(
+      userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 }

@@ -11,6 +11,7 @@ import { toUserResponse } from '../users/dto/user.response.dto';
 interface JwtPayload {
   sub: string;
   email: string;
+  orgId?: string | null;
 }
 
 @Injectable()
@@ -35,10 +36,11 @@ export class AuthService {
 
     const tokens = await this.issueTokens(user);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
+    const roleKeys = await this.authRepo.getRoleKeys(user.id);
 
     return {
       ...tokens,
-      user: toUserResponse(user),
+      user: toUserResponse(user, roleKeys),
     };
   }
 
@@ -55,10 +57,11 @@ export class AuthService {
 
     const tokens = await this.issueTokens(user);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
+    const roleKeys = await this.authRepo.getRoleKeys(user.id);
 
     return {
       ...tokens,
-      user: toUserResponse(user),
+      user: toUserResponse(user, roleKeys),
     };
   }
 
@@ -75,17 +78,36 @@ export class AuthService {
 
     const tokens = await this.issueTokens(user);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
+    const roleKeys = await this.authRepo.getRoleKeys(user.id);
 
     return {
       ...tokens,
-      user: toUserResponse(user),
+      user: toUserResponse(user, roleKeys),
     };
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.authRepo.findById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const validPassword = await argon2.verify(user.passwordHash, currentPassword);
+    if (!validPassword) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordHash = await argon2.hash(newPassword);
+    await this.authRepo.updatePasswordHash(user.id, passwordHash);
+
+    return { success: true };
   }
 
   private async issueTokens(user: User) {
     const accessPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
+      orgId: user.orgId ?? null,
     };
 
     const refreshPayload = {

@@ -1,0 +1,1195 @@
+import {
+  CanActivate,
+  ExecutionContext,
+  INestApplication,
+  Injectable,
+} from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { randomUUID } from 'crypto';
+import { createValidationPipe } from '../src/common/pipes/validation.pipe';
+import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
+import { OrgScopeGuard } from '../src/common/guards/org-scope.guard';
+import { BuildingAccessGuard } from '../src/common/guards/building-access.guard';
+import { BuildingAccessService } from '../src/common/building-access/building-access.service';
+import { AccessControlService } from '../src/modules/access-control/access-control.service';
+import { PrismaService } from '../src/infra/prisma/prisma.service';
+import { MaintenanceRequestsRepo } from '../src/modules/maintenance-requests/maintenance-requests.repo';
+import { MaintenanceRequestsService } from '../src/modules/maintenance-requests/maintenance-requests.service';
+import { ResidentRequestsController } from '../src/modules/maintenance-requests/resident-requests.controller';
+import { BuildingRequestsController } from '../src/modules/maintenance-requests/building-requests.controller';
+import { NotificationsController } from '../src/modules/notifications/notifications.controller';
+import { NotificationsRepo } from '../src/modules/notifications/notifications.repo';
+import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { NotificationTypeEnum } from '../src/modules/notifications/notifications.constants';
+
+type OrgRecord = {
+  id: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type UserRecord = {
+  id: string;
+  email: string;
+  passwordHash: string;
+  refreshTokenHash?: string | null;
+  name?: string | null;
+  orgId?: string | null;
+  mustChangePassword: boolean;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type BuildingRecord = {
+  id: string;
+  orgId: string;
+  name: string;
+  city: string;
+  emirate?: string | null;
+  country: string;
+  timezone: string;
+  floors?: number | null;
+  unitsCount?: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type UnitRecord = {
+  id: string;
+  buildingId: string;
+  label: string;
+  floor?: number | null;
+  notes?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type BuildingAssignmentRecord = {
+  id: string;
+  buildingId: string;
+  userId: string;
+  type: 'MANAGER' | 'STAFF' | 'BUILDING_ADMIN';
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type OccupancyRecord = {
+  id: string;
+  buildingId: string;
+  unitId: string;
+  residentUserId: string;
+  status: 'ACTIVE' | 'ENDED';
+  startAt: Date;
+  endAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type RequestRecord = {
+  id: string;
+  orgId: string;
+  buildingId: string;
+  unitId?: string | null;
+  createdByUserId: string;
+  title: string;
+  description?: string | null;
+  status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED';
+  priority?: string | null;
+  type?: string | null;
+  assignedToUserId?: string | null;
+  assignedAt?: Date | null;
+  completedAt?: Date | null;
+  canceledAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type CommentRecord = {
+  id: string;
+  requestId: string;
+  orgId: string;
+  authorUserId: string;
+  message: string;
+  createdAt: Date;
+};
+
+type NotificationRecord = {
+  id: string;
+  orgId: string;
+  recipientUserId: string;
+  type: NotificationTypeEnum;
+  title: string;
+  body?: string | null;
+  data: Record<string, unknown>;
+  readAt?: Date | null;
+  createdAt: Date;
+};
+
+let prisma: InMemoryPrismaService;
+
+class InMemoryPrismaService {
+  private orgs: OrgRecord[] = [];
+  private users: UserRecord[] = [];
+  private buildings: BuildingRecord[] = [];
+  private units: UnitRecord[] = [];
+  private assignments: BuildingAssignmentRecord[] = [];
+  private occupancies: OccupancyRecord[] = [];
+  private requests: RequestRecord[] = [];
+  private comments: CommentRecord[] = [];
+  private notifications: NotificationRecord[] = [];
+
+  org = {
+    create: async ({ data }: { data: { name: string } }) => {
+      const now = new Date();
+      const org: OrgRecord = {
+        id: randomUUID(),
+        name: data.name,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.orgs.push(org);
+      return org;
+    },
+  };
+
+  user = {
+    findUnique: async ({
+      where,
+    }: {
+      where: { id?: string; email?: string };
+    }) => {
+      if (where.id) {
+        return this.users.find((user) => user.id === where.id) ?? null;
+      }
+      if (where.email) {
+        return this.users.find((user) => user.email === where.email) ?? null;
+      }
+      return null;
+    },
+    create: async ({
+      data,
+    }: {
+      data: {
+        email: string;
+        passwordHash: string;
+        name?: string | null;
+        orgId?: string | null;
+        mustChangePassword?: boolean;
+        isActive?: boolean;
+      };
+    }) => {
+      const now = new Date();
+      const user: UserRecord = {
+        id: randomUUID(),
+        email: data.email,
+        passwordHash: data.passwordHash,
+        name: data.name ?? null,
+        orgId: data.orgId ?? null,
+        mustChangePassword: data.mustChangePassword ?? false,
+        isActive: data.isActive ?? true,
+        refreshTokenHash: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.users.push(user);
+      return user;
+    },
+  };
+
+  building = {
+    create: async ({
+      data,
+    }: {
+      data: {
+        orgId: string;
+        name: string;
+        city: string;
+        emirate?: string | null;
+        country: string;
+        timezone: string;
+        floors?: number | null;
+        unitsCount?: number | null;
+      };
+    }) => {
+      const now = new Date();
+      const building: BuildingRecord = {
+        id: randomUUID(),
+        orgId: data.orgId,
+        name: data.name,
+        city: data.city,
+        emirate: data.emirate ?? null,
+        country: data.country,
+        timezone: data.timezone,
+        floors: data.floors ?? null,
+        unitsCount: data.unitsCount ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.buildings.push(building);
+      return building;
+    },
+    findFirst: async ({
+      where,
+    }: {
+      where: { id: string; orgId: string };
+    }) => {
+      return (
+        this.buildings.find(
+          (building) =>
+            building.id === where.id && building.orgId === where.orgId,
+        ) ?? null
+      );
+    },
+  };
+
+  unit = {
+    create: async ({
+      data,
+    }: {
+      data: { buildingId: string; label: string };
+    }) => {
+      const now = new Date();
+      const unit: UnitRecord = {
+        id: randomUUID(),
+        buildingId: data.buildingId,
+        label: data.label,
+        floor: null,
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.units.push(unit);
+      return unit;
+    },
+    findFirst: async ({
+      where,
+    }: {
+      where: { id?: string; buildingId: string };
+    }) => {
+      return (
+        this.units.find(
+          (unit) =>
+            unit.buildingId === where.buildingId &&
+            (where.id ? unit.id === where.id : true),
+        ) ?? null
+      );
+    },
+  };
+
+  buildingAssignment = {
+    findMany: async ({
+      where,
+      include,
+    }: {
+      where: { buildingId: string; userId?: string; type?: { in: string[] } };
+      include?: { user?: boolean };
+    }) => {
+      const results = this.assignments.filter((assignment) => {
+        if (assignment.buildingId !== where.buildingId) {
+          return false;
+        }
+        if (where.userId && assignment.userId !== where.userId) {
+          return false;
+        }
+        if (where.type?.in && !where.type.in.includes(assignment.type)) {
+          return false;
+        }
+        return true;
+      });
+      return results.map((assignment) => ({
+        ...assignment,
+        user: include?.user
+          ? this.users.find((user) => user.id === assignment.userId) ?? null
+          : undefined,
+      }));
+    },
+    findFirst: async ({
+      where,
+    }: {
+      where: { buildingId: string; userId: string; type: 'STAFF' };
+    }) => {
+      return (
+        this.assignments.find(
+          (assignment) =>
+            assignment.buildingId === where.buildingId &&
+            assignment.userId === where.userId &&
+            assignment.type === where.type,
+        ) ?? null
+      );
+    },
+    create: async ({
+      data,
+    }: {
+      data: { buildingId: string; userId: string; type: 'MANAGER' | 'STAFF' | 'BUILDING_ADMIN' };
+    }) => {
+      const now = new Date();
+      const assignment: BuildingAssignmentRecord = {
+        id: randomUUID(),
+        buildingId: data.buildingId,
+        userId: data.userId,
+        type: data.type,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.assignments.push(assignment);
+      return assignment;
+    },
+  };
+
+  occupancy = {
+    findFirst: async ({
+      where,
+      include,
+    }: {
+      where: {
+        residentUserId?: string;
+        unitId?: string;
+        buildingId?: string;
+        status: 'ACTIVE' | 'ENDED';
+      };
+      include?: { building?: boolean; unit?: boolean };
+    }) => {
+      const occupancy =
+        this.occupancies.find(
+          (occ) =>
+            (where.residentUserId
+              ? occ.residentUserId === where.residentUserId
+              : true) &&
+            (where.unitId ? occ.unitId === where.unitId : true) &&
+            (where.buildingId ? occ.buildingId === where.buildingId : true) &&
+            occ.status === where.status,
+        ) ?? null;
+      if (!occupancy) {
+        return null;
+      }
+      return {
+        ...occupancy,
+        building: include?.building
+          ? this.buildings.find((b) => b.id === occupancy.buildingId)
+          : undefined,
+        unit: include?.unit
+          ? this.units.find((u) => u.id === occupancy.unitId)
+          : undefined,
+      };
+    },
+    create: async ({
+      data,
+    }: {
+      data: {
+        buildingId: string;
+        unitId: string;
+        residentUserId: string;
+        status: 'ACTIVE' | 'ENDED';
+      };
+    }) => {
+      const now = new Date();
+      const occupancy: OccupancyRecord = {
+        id: randomUUID(),
+        buildingId: data.buildingId,
+        unitId: data.unitId,
+        residentUserId: data.residentUserId,
+        status: data.status,
+        startAt: now,
+        endAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.occupancies.push(occupancy);
+      return occupancy;
+    },
+  };
+
+  maintenanceRequest = {
+    create: async ({
+      data,
+      include,
+    }: {
+      data: {
+        org: { connect: { id: string } };
+        building: { connect: { id: string } };
+        unit?: { connect: { id: string } } | null;
+        createdByUser: { connect: { id: string } };
+        title: string;
+        description?: string | null;
+        status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED';
+        priority?: string | null;
+        type?: string | null;
+      };
+      include?: { unit?: boolean; assignedToUser?: boolean; attachments?: boolean; createdByUser?: boolean };
+    }) => {
+      const now = new Date();
+      const request: RequestRecord = {
+        id: randomUUID(),
+        orgId: data.org.connect.id,
+        buildingId: data.building.connect.id,
+        unitId: data.unit?.connect.id ?? null,
+        createdByUserId: data.createdByUser.connect.id,
+        title: data.title,
+        description: data.description ?? null,
+        status: data.status,
+        priority: data.priority ?? null,
+        type: data.type ?? null,
+        assignedToUserId: null,
+        assignedAt: null,
+        completedAt: null,
+        canceledAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.requests.push(request);
+      return this.hydrateRequest(request, include);
+    },
+    findFirst: async ({
+      where,
+      include,
+    }: {
+      where: {
+        id: string;
+        orgId: string;
+        buildingId?: string;
+        createdByUserId?: string;
+      };
+      include?: { unit?: boolean; createdByUser?: boolean; assignedToUser?: boolean; attachments?: boolean };
+    }) => {
+      const request =
+        this.requests.find(
+          (req) =>
+            req.id === where.id &&
+            req.orgId === where.orgId &&
+            (where.buildingId ? req.buildingId === where.buildingId : true) &&
+            (where.createdByUserId
+              ? req.createdByUserId === where.createdByUserId
+              : true),
+        ) ?? null;
+      if (!request) {
+        return null;
+      }
+      return this.hydrateRequest(request, include);
+    },
+    update: async ({
+      where,
+      data,
+      include,
+    }: {
+      where: { id: string };
+      data: {
+        title?: string;
+        description?: string | null;
+        status?: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED';
+        assignedAt?: Date | null;
+        completedAt?: Date | null;
+        canceledAt?: Date | null;
+        assignedToUser?: { connect: { id: string } };
+      };
+      include?: { unit?: boolean; createdByUser?: boolean; assignedToUser?: boolean };
+    }) => {
+      const request = this.requests.find((req) => req.id === where.id);
+      if (!request) {
+        throw new Error('Request not found');
+      }
+      if (data.title !== undefined) {
+        request.title = data.title;
+      }
+      if (data.description !== undefined) {
+        request.description = data.description;
+      }
+      if (data.status) {
+        request.status = data.status;
+      }
+      if (data.assignedToUser) {
+        request.assignedToUserId = data.assignedToUser.connect.id;
+      }
+      if (data.assignedAt !== undefined) {
+        request.assignedAt = data.assignedAt;
+      }
+      if (data.completedAt !== undefined) {
+        request.completedAt = data.completedAt;
+      }
+      if (data.canceledAt !== undefined) {
+        request.canceledAt = data.canceledAt;
+      }
+      request.updatedAt = new Date();
+      return this.hydrateRequest(request, include);
+    },
+  };
+
+  maintenanceRequestComment = {
+    create: async ({
+      data,
+      include,
+    }: {
+      data: {
+        request: { connect: { id: string } };
+        org: { connect: { id: string } };
+        authorUser: { connect: { id: string } };
+        message: string;
+      };
+      include?: { authorUser?: boolean };
+    }) => {
+      const now = new Date();
+      const comment: CommentRecord = {
+        id: randomUUID(),
+        requestId: data.request.connect.id,
+        orgId: data.org.connect.id,
+        authorUserId: data.authorUser.connect.id,
+        message: data.message,
+        createdAt: now,
+      };
+      this.comments.push(comment);
+      return this.hydrateComment(comment, include);
+    },
+  };
+
+  notification = {
+    createMany: async ({
+      data,
+    }: {
+      data: {
+        orgId: string;
+        recipientUserId: string;
+        type: NotificationTypeEnum;
+        title: string;
+        body?: string | null;
+        data: Record<string, unknown>;
+      }[];
+    }) => {
+      const now = new Date();
+      for (const notification of data) {
+        const record: NotificationRecord = {
+          id: randomUUID(),
+          orgId: notification.orgId,
+          recipientUserId: notification.recipientUserId,
+          type: notification.type,
+          title: notification.title,
+          body: notification.body ?? null,
+          data: notification.data,
+          readAt: null,
+          createdAt: now,
+        };
+        this.notifications.push(record);
+      }
+      return { count: data.length };
+    },
+    findFirst: async ({
+      where,
+    }: {
+      where: { id: string; recipientUserId: string; orgId: string };
+    }) => {
+      return (
+        this.notifications.find(
+          (notification) =>
+            notification.id === where.id &&
+            notification.recipientUserId === where.recipientUserId &&
+            notification.orgId === where.orgId,
+        ) ?? null
+      );
+    },
+    findMany: async ({
+      where,
+      orderBy,
+      take,
+    }: {
+      where: {
+        orgId: string;
+        recipientUserId: string;
+        readAt?: null;
+        OR?: Array<Record<string, any>>;
+      };
+      orderBy?: Array<Record<string, 'asc' | 'desc'>>;
+      take?: number;
+    }) => {
+      let results = this.notifications.filter(
+        (notification) =>
+          notification.orgId === where.orgId &&
+          notification.recipientUserId === where.recipientUserId,
+      );
+      if (where.readAt === null) {
+        results = results.filter((notification) => notification.readAt === null);
+      }
+      if (where.OR) {
+        const [older, same] = where.OR;
+        results = results.filter((notification) => {
+          if (older?.createdAt?.lt) {
+            if (notification.createdAt < older.createdAt.lt) {
+              return true;
+            }
+          }
+          if (same?.createdAt && same?.id?.lt) {
+            return (
+              notification.createdAt.getTime() === same.createdAt.getTime() &&
+              notification.id < same.id.lt
+            );
+          }
+          return false;
+        });
+      }
+      if (orderBy) {
+        results = [...results].sort((a, b) => {
+          for (const order of orderBy) {
+            if (order.createdAt) {
+              const diff =
+                order.createdAt === 'desc'
+                  ? b.createdAt.getTime() - a.createdAt.getTime()
+                  : a.createdAt.getTime() - b.createdAt.getTime();
+              if (diff !== 0) {
+                return diff;
+              }
+            }
+            if (order.id) {
+              if (a.id === b.id) {
+                continue;
+              }
+              return order.id === 'desc'
+                ? b.id.localeCompare(a.id)
+                : a.id.localeCompare(b.id);
+            }
+          }
+          return 0;
+        });
+      }
+      if (take !== undefined) {
+        results = results.slice(0, take);
+      }
+      return results;
+    },
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where: { id?: string; recipientUserId: string; orgId: string; readAt?: null };
+      data: { readAt: Date };
+    }) => {
+      let count = 0;
+      for (const notification of this.notifications) {
+        if (where.id && notification.id !== where.id) {
+          continue;
+        }
+        if (notification.recipientUserId !== where.recipientUserId) {
+          continue;
+        }
+        if (notification.orgId !== where.orgId) {
+          continue;
+        }
+        if (where.readAt === null && notification.readAt !== null) {
+          continue;
+        }
+        notification.readAt = data.readAt;
+        count += 1;
+      }
+      return { count };
+    },
+  };
+
+  async $transaction<T>(arg: ((tx: this) => Promise<T>) | Promise<T>[]) {
+    if (Array.isArray(arg)) {
+      return Promise.all(arg);
+    }
+    return arg(this);
+  }
+
+  private hydrateRequest(
+    request: RequestRecord,
+    include?: {
+      unit?: boolean;
+      createdByUser?: boolean;
+      assignedToUser?: boolean;
+      attachments?: boolean;
+    },
+  ) {
+    return {
+      ...request,
+      unit: include?.unit
+        ? this.units.find((unit) => unit.id === request.unitId) ?? null
+        : undefined,
+      createdByUser: include?.createdByUser
+        ? this.users.find((user) => user.id === request.createdByUserId) ?? null
+        : undefined,
+      assignedToUser: include?.assignedToUser
+        ? this.users.find((user) => user.id === request.assignedToUserId) ?? null
+        : undefined,
+      attachments: include?.attachments ? [] : undefined,
+    };
+  }
+
+  private hydrateComment(
+    comment: CommentRecord,
+    include?: { authorUser?: boolean },
+  ) {
+    return {
+      ...comment,
+      authorUser: include?.authorUser
+        ? this.users.find((user) => user.id === comment.authorUserId) ?? null
+        : undefined,
+    };
+  }
+
+  reset() {
+    this.orgs = [];
+    this.users = [];
+    this.buildings = [];
+    this.units = [];
+    this.assignments = [];
+    this.occupancies = [];
+    this.requests = [];
+    this.comments = [];
+    this.notifications = [];
+  }
+}
+
+@Injectable()
+class TestAuthGuard implements CanActivate {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const userHeader = request.headers['x-user-id'];
+    const userId = Array.isArray(userHeader) ? userHeader[0] : userHeader;
+    if (!userId || typeof userId !== 'string') {
+      return false;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return false;
+    }
+
+    request.user = {
+      sub: user.id,
+      email: user.email,
+      orgId: user.orgId ?? null,
+    };
+    return true;
+  }
+}
+
+describe('Notifications (integration)', () => {
+  let app: INestApplication;
+  let baseUrl: string;
+  let managerA: UserRecord;
+  let buildingAdminA: UserRecord;
+  let staffA: UserRecord;
+  let residentA: UserRecord;
+  let orgUserB: UserRecord;
+  let buildingA: BuildingRecord;
+  let unitA1: UnitRecord;
+
+  const permissionsByUser = new Map<string, Set<string>>();
+
+  const listNotifications = async (
+    userId: string,
+    query = '',
+  ): Promise<{ items: any[]; nextCursor?: string }> => {
+    const response = await fetch(`${baseUrl}/notifications${query}`, {
+      headers: { 'x-user-id': userId },
+    });
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+
+  beforeAll(async () => {
+    prisma = new InMemoryPrismaService();
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [
+        ResidentRequestsController,
+        BuildingRequestsController,
+        NotificationsController,
+      ],
+      providers: [
+        MaintenanceRequestsRepo,
+        MaintenanceRequestsService,
+        NotificationsRepo,
+        NotificationsService,
+        OrgScopeGuard,
+        BuildingAccessService,
+        BuildingAccessGuard,
+        {
+          provide: AccessControlService,
+          useValue: {
+            getUserEffectivePermissions: async (userId: string) =>
+              permissionsByUser.get(userId) ?? new Set<string>(),
+          },
+        },
+        { provide: PrismaService, useValue: prisma },
+      ],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useClass(TestAuthGuard)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(createValidationPipe());
+    await app.init();
+    await app.listen(0);
+    baseUrl = await app.getUrl();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(async () => {
+    prisma.reset();
+    permissionsByUser.clear();
+
+    const orgA = await prisma.org.create({ data: { name: 'Org A' } });
+    const orgB = await prisma.org.create({ data: { name: 'Org B' } });
+
+    buildingA = await prisma.building.create({
+      data: {
+        orgId: orgA.id,
+        name: 'A1',
+        city: 'Dubai',
+        emirate: 'Dubai',
+        country: 'ARE',
+        timezone: 'Asia/Dubai',
+      },
+    });
+
+    unitA1 = await prisma.unit.create({
+      data: { buildingId: buildingA.id, label: 'A-101' },
+    });
+
+    managerA = await prisma.user.create({
+      data: {
+        email: 'manager@org.test',
+        passwordHash: 'hash',
+        orgId: orgA.id,
+        name: 'Manager A',
+        isActive: true,
+      },
+    });
+    buildingAdminA = await prisma.user.create({
+      data: {
+        email: 'building-admin@org.test',
+        passwordHash: 'hash',
+        orgId: orgA.id,
+        name: 'Building Admin A',
+        isActive: true,
+      },
+    });
+    staffA = await prisma.user.create({
+      data: {
+        email: 'staff@org.test',
+        passwordHash: 'hash',
+        orgId: orgA.id,
+        name: 'Staff A',
+        isActive: true,
+      },
+    });
+    residentA = await prisma.user.create({
+      data: {
+        email: 'resident@org.test',
+        passwordHash: 'hash',
+        orgId: orgA.id,
+        name: 'Resident A',
+        isActive: true,
+      },
+    });
+    orgUserB = await prisma.user.create({
+      data: {
+        email: 'user@orgb.test',
+        passwordHash: 'hash',
+        orgId: orgB.id,
+        name: 'Org B User',
+        isActive: true,
+      },
+    });
+
+    await prisma.buildingAssignment.create({
+      data: { buildingId: buildingA.id, userId: managerA.id, type: 'MANAGER' },
+    });
+    await prisma.buildingAssignment.create({
+      data: {
+        buildingId: buildingA.id,
+        userId: buildingAdminA.id,
+        type: 'BUILDING_ADMIN',
+      },
+    });
+    await prisma.buildingAssignment.create({
+      data: { buildingId: buildingA.id, userId: staffA.id, type: 'STAFF' },
+    });
+
+    await prisma.occupancy.create({
+      data: {
+        buildingId: buildingA.id,
+        unitId: unitA1.id,
+        residentUserId: residentA.id,
+        status: 'ACTIVE',
+      },
+    });
+  });
+
+  it('resident creation notifies manager and building admin', async () => {
+    const createResponse = await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({
+        title: 'Leaky faucet',
+        description: 'Kitchen sink dripping',
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+
+    const managerNotifications = await listNotifications(managerA.id);
+    expect(
+      managerNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_CREATED,
+      ),
+    ).toBe(true);
+
+    const adminNotifications = await listNotifications(buildingAdminA.id);
+    expect(
+      adminNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_CREATED,
+      ),
+    ).toBe(true);
+
+    const residentNotifications = await listNotifications(residentA.id);
+    expect(residentNotifications.items).toHaveLength(0);
+  });
+
+  it('assignment notifies staff and resident', async () => {
+    const createResponse = await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'Door jammed' }),
+    });
+    const created = await createResponse.json();
+
+    const assignResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingA.id}/requests/${created.id}/assign`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': buildingAdminA.id,
+        },
+        body: JSON.stringify({ staffUserId: staffA.id }),
+      },
+    );
+    expect(assignResponse.status).toBe(201);
+
+    const staffNotifications = await listNotifications(staffA.id);
+    expect(
+      staffNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_ASSIGNED,
+      ),
+    ).toBe(true);
+
+    const residentNotifications = await listNotifications(residentA.id);
+    expect(
+      residentNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_ASSIGNED,
+      ),
+    ).toBe(true);
+  });
+
+  it('status updates notify resident', async () => {
+    const createResponse = await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'AC noise' }),
+    });
+    const created = await createResponse.json();
+
+    await fetch(
+      `${baseUrl}/org/buildings/${buildingA.id}/requests/${created.id}/assign`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': buildingAdminA.id,
+        },
+        body: JSON.stringify({ staffUserId: staffA.id }),
+      },
+    );
+
+    const statusResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingA.id}/requests/${created.id}/status`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': staffA.id,
+        },
+        body: JSON.stringify({ status: 'IN_PROGRESS' }),
+      },
+    );
+    expect(statusResponse.status).toBe(201);
+
+    const residentNotifications = await listNotifications(residentA.id);
+    expect(
+      residentNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_STATUS_CHANGED,
+      ),
+    ).toBe(true);
+  });
+
+  it('resident comment notifies ops and assigned staff', async () => {
+    const createResponse = await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'Hallway light' }),
+    });
+    const created = await createResponse.json();
+
+    await fetch(
+      `${baseUrl}/org/buildings/${buildingA.id}/requests/${created.id}/assign`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': buildingAdminA.id,
+        },
+        body: JSON.stringify({ staffUserId: staffA.id }),
+      },
+    );
+
+    const commentResponse = await fetch(
+      `${baseUrl}/resident/requests/${created.id}/comments`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': residentA.id,
+        },
+        body: JSON.stringify({ message: 'Please fix soon' }),
+      },
+    );
+    expect(commentResponse.status).toBe(201);
+
+    const managerNotifications = await listNotifications(managerA.id);
+    expect(
+      managerNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_COMMENTED,
+      ),
+    ).toBe(true);
+
+    const adminNotifications = await listNotifications(buildingAdminA.id);
+    expect(
+      adminNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_COMMENTED,
+      ),
+    ).toBe(true);
+
+    const staffNotifications = await listNotifications(staffA.id);
+    expect(
+      staffNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_COMMENTED,
+      ),
+    ).toBe(true);
+
+    const residentNotifications = await listNotifications(residentA.id);
+    expect(
+      residentNotifications.items.some(
+        (notification) =>
+          notification.type === NotificationTypeEnum.REQUEST_COMMENTED,
+      ),
+    ).toBe(false);
+  });
+
+  it('marking a notification read hides it from unread-only list', async () => {
+    await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'Noise' }),
+    });
+
+    const managerNotifications = await listNotifications(managerA.id);
+    const [first] = managerNotifications.items;
+    expect(first).toBeTruthy();
+
+    const markResponse = await fetch(
+      `${baseUrl}/notifications/${first.id}/read`,
+      {
+        method: 'POST',
+        headers: { 'x-user-id': managerA.id },
+      },
+    );
+    expect(markResponse.status).toBe(201);
+
+    const unread = await listNotifications(managerA.id, '?unreadOnly=true');
+    expect(unread.items).toHaveLength(0);
+  });
+
+  it('mark all read clears unread list', async () => {
+    const createResponse = await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'Broken window' }),
+    });
+    const created = await createResponse.json();
+
+    await fetch(
+      `${baseUrl}/org/buildings/${buildingA.id}/requests/${created.id}/assign`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': buildingAdminA.id,
+        },
+        body: JSON.stringify({ staffUserId: staffA.id }),
+      },
+    );
+
+    const markAll = await fetch(`${baseUrl}/notifications/read-all`, {
+      method: 'POST',
+      headers: { 'x-user-id': managerA.id },
+    });
+    expect(markAll.status).toBe(201);
+
+    const unread = await listNotifications(managerA.id, '?unreadOnly=true');
+    expect(unread.items).toHaveLength(0);
+  });
+
+  it('cross-org users cannot read or mark notifications', async () => {
+    await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'Buzzing alarm' }),
+    });
+
+    const managerNotifications = await listNotifications(managerA.id);
+    const [first] = managerNotifications.items;
+
+    const markResponse = await fetch(
+      `${baseUrl}/notifications/${first.id}/read`,
+      {
+        method: 'POST',
+        headers: { 'x-user-id': orgUserB.id },
+      },
+    );
+    expect(markResponse.status).toBe(404);
+  });
+});

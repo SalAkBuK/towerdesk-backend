@@ -9,4 +9,33 @@ export class UsersRepo {
   findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
   }
+
+  listByOrg(orgId: string): Promise<User[]> {
+    return this.prisma.user.findMany({
+      where: { orgId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getRoleKeys(userId: string): Promise<string[]> {
+    const roles = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: { role: true },
+    });
+    return roles.map((entry) => entry.role.key);
+  }
+
+  updateProfile(
+    id: string,
+    data: { name?: string; avatarUrl?: string; phone?: string },
+  ): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.avatarUrl !== undefined ? { avatarUrl: data.avatarUrl } : {}),
+        ...(data.phone !== undefined ? { phone: data.phone } : {}),
+      },
+    });
+  }
 }
