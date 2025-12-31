@@ -182,6 +182,23 @@ class InMemoryPrismaService {
       this.userRoles.push(record);
       return record;
     },
+    findMany: async ({
+      where,
+      include,
+    }: {
+      where: { userId: string };
+      include?: { role?: boolean };
+    }) => {
+      const results = this.userRoles.filter(
+        (record) => record.userId === where.userId,
+      );
+      return results.map((record) => ({
+        ...record,
+        role: include?.role
+          ? this.roles.find((role) => role.id === record.roleId) ?? null
+          : undefined,
+      }));
+    },
   };
 
   reset() {

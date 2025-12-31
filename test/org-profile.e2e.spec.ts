@@ -156,6 +156,12 @@ class InMemoryPrismaService {
     },
   };
 
+  userRole = {
+    findMany: async () => {
+      return [];
+    },
+  };
+
   reset() {
     this.orgs = [];
     this.users = [];

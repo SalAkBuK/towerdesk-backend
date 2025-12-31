@@ -25,6 +25,13 @@ NestJS + TypeScript backend scaffold with Prisma, JWT auth, and clean modular st
 
 API docs: http://localhost:PORT/docs
 
+## Realtime notifications (WebSocket)
+- Namespace: `/notifications` (Socket.IO path is `/socket.io` unless overridden in docs).
+- Env: `WS_CORS_ORIGINS` (comma-separated; required in production).
+- Env: `WS_LOG_CONNECTIONS` (true/false; optional).
+- Smoke test: `npm run ws:smoke`.
+- Uses dev-only `POST /api/dev/notifications/create` and is disabled in production.
+
 ## Deploy on Render + Neon
 1) Provision a Neon Postgres database and copy the connection string.
 2) In Render, create a new Web Service from this repo.

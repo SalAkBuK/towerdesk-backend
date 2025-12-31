@@ -20,6 +20,9 @@ export class NotificationResponseDto {
   @ApiPropertyOptional({ nullable: true })
   readAt?: Date | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  dismissedAt?: Date | null;
+
   @ApiProperty()
   createdAt!: Date;
 }
@@ -31,6 +34,7 @@ export const toNotificationResponse = (notification: {
   body?: string | null;
   data: Record<string, unknown>;
   readAt?: Date | null;
+  dismissedAt?: Date | null;
   createdAt: Date;
 }): NotificationResponseDto => ({
   id: notification.id,
@@ -39,5 +43,6 @@ export const toNotificationResponse = (notification: {
   body: notification.body ?? null,
   data: notification.data,
   readAt: notification.readAt ?? null,
+  dismissedAt: notification.dismissedAt ?? null,
   createdAt: notification.createdAt,
 });

@@ -1,294 +1,224 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { resolvePagination } from '../../common/utils/pagination';
-import { DbClient } from '../../infra/prisma/db-client';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NotificationTypeEnum } from './notifications.constants';
 import { NotificationsRepo, NotificationInput } from './notifications.repo';
+import { NotificationsRealtimeService } from './notifications-realtime.service';
+import { toNotificationResponse } from './dto/notification.response.dto';
 
-type RequestSnapshot = {
-  id: string;
-  orgId: string;
-  buildingId: string;
-  unitId?: string | null;
-  title: string;
-  status?: string | null;
-  createdByUserId: string;
-  assignedToUserId?: string | null;
-  unit?: { id: string; label: string } | null;
-};
-
-type CommentSnapshot = {
-  id: string;
-  message: string;
-};
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     private readonly notificationsRepo: NotificationsRepo,
+    private readonly realtimeService: NotificationsRealtimeService,
   ) {}
 
   async listForUser(
     userId: string,
     orgId: string,
-    options: { unreadOnly?: boolean; cursor?: string; limit?: number },
+    options: {
+      unreadOnly?: boolean;
+      includeDismissed?: boolean;
+      cursor?: string;
+      limit?: number;
+    },
   ) {
-    const { take } = resolvePagination(options.limit, 0);
-    let cursorInfo: { id: string; createdAt: Date } | undefined;
+    const limit = Math.min(
+      Math.max(options.limit ?? DEFAULT_LIMIT, 1),
+      MAX_LIMIT,
+    );
 
-    if (options.cursor) {
-      const cursorRecord = await this.notificationsRepo.findByIdForUser(
-        options.cursor,
-        userId,
-        orgId,
-      );
-      if (!cursorRecord) {
-        throw new NotFoundException('Notification not found');
-      }
-      cursorInfo = { id: cursorRecord.id, createdAt: cursorRecord.createdAt };
-    }
+    const cursorInfo = options.cursor
+      ? this.decodeCursor(options.cursor)
+      : undefined;
 
-    return this.notificationsRepo.listForUser(userId, orgId, {
+    const { items } = await this.notificationsRepo.listForUser(userId, orgId, {
       unreadOnly: options.unreadOnly,
-      limit: take,
+      includeDismissed: options.includeDismissed,
+      take: limit + 1,
       cursor: cursorInfo,
     });
+
+    const hasMore = items.length > limit;
+    const sliced = hasMore ? items.slice(0, limit) : items;
+    const nextCursor = hasMore
+      ? this.encodeCursor(sliced[sliced.length - 1])
+      : undefined;
+
+    return { items: sliced, nextCursor };
+  }
+
+  async createForUsers(input: {
+    orgId: string;
+    userIds: string[];
+    type: NotificationTypeEnum;
+    title: string;
+    body?: string;
+    data: Record<string, unknown>;
+  }) {
+    const uniqueUserIds = Array.from(new Set(input.userIds)).filter(Boolean);
+    if (uniqueUserIds.length === 0) {
+      return [];
+    }
+
+    const notifications: NotificationInput[] = uniqueUserIds.map((userId) => ({
+      orgId: input.orgId,
+      recipientUserId: userId,
+      type: input.type,
+      title: input.title,
+      body: input.body ?? null,
+      data: input.data,
+    }));
+
+    const created = await this.notificationsRepo.createManyAndReturn(
+      notifications,
+    );
+
+    const payloads = created.map(toNotificationResponse);
+    created.forEach((notification, index) => {
+      this.logger.debug({
+        event: 'notifications:new',
+        recipientUserId: notification.recipientUserId,
+        type: notification.type,
+        requestId: (notification.data as Record<string, unknown>)?.requestId,
+      });
+      this.realtimeService.publishToUser(
+        input.orgId,
+        notification.recipientUserId,
+        'notifications:new',
+        payloads[index],
+      );
+    });
+
+    return payloads;
   }
 
   async markRead(notificationId: string, userId: string, orgId: string) {
-    const updated = await this.notificationsRepo.markRead(
+    const existing = await this.notificationsRepo.findByIdForUser(
       notificationId,
       userId,
       orgId,
     );
-    if (updated === 0) {
+    if (!existing) {
       throw new NotFoundException('Notification not found');
+    }
+
+    if (!existing.readAt && !existing.dismissedAt) {
+      const readAt = new Date();
+      await this.notificationsRepo.markRead(
+        notificationId,
+        userId,
+        orgId,
+        readAt,
+      );
+      this.realtimeService.publishToUser(orgId, userId, 'notifications:read', {
+        id: notificationId,
+        readAt,
+      });
     }
   }
 
   async markAllRead(userId: string, orgId: string) {
-    await this.notificationsRepo.markAllRead(userId, orgId);
-  }
-
-  async notifyRequestCreated(
-    tx: DbClient,
-    request: RequestSnapshot,
-    actorUserId: string,
-  ) {
-    const recipients = await this.getBuildingManagersAndAdmins(
-      tx,
-      request.buildingId,
-      request.orgId,
+    const readAt = new Date();
+    const updated = await this.notificationsRepo.markAllRead(
+      userId,
+      orgId,
+      readAt,
     );
-    this.removeActor(recipients, actorUserId);
-
-    return this.notificationsRepo.createMany(
-      this.buildNotifications(
-        recipients,
-        request,
-        actorUserId,
-        NotificationTypeEnum.REQUEST_CREATED,
-        'New maintenance request',
-        this.buildRequestBody(request),
-      ),
-      tx,
-    );
-  }
-
-  async notifyRequestAssigned(
-    tx: DbClient,
-    request: RequestSnapshot,
-    actorUserId: string,
-  ) {
-    const recipients = new Set<string>();
-    if (request.assignedToUserId) {
-      recipients.add(request.assignedToUserId);
-    }
-    recipients.add(request.createdByUserId);
-
-    const managers = await this.getBuildingManagersAndAdmins(
-      tx,
-      request.buildingId,
-      request.orgId,
-    );
-    managers.forEach((id) => recipients.add(id));
-
-    this.removeActor(recipients, actorUserId);
-
-    return this.notificationsRepo.createMany(
-      this.buildNotifications(
-        recipients,
-        request,
-        actorUserId,
-        NotificationTypeEnum.REQUEST_ASSIGNED,
-        'Request assigned',
-        this.buildRequestBody(request),
-      ),
-      tx,
-    );
-  }
-
-  async notifyRequestStatusChanged(
-    tx: DbClient,
-    request: RequestSnapshot,
-    actorUserId: string,
-  ) {
-    const recipients = new Set<string>([request.createdByUserId]);
-    this.removeActor(recipients, actorUserId);
-
-    return this.notificationsRepo.createMany(
-      this.buildNotifications(
-        recipients,
-        request,
-        actorUserId,
-        NotificationTypeEnum.REQUEST_STATUS_CHANGED,
-        'Request status updated',
-        request.status ?? undefined,
-      ),
-      tx,
-    );
-  }
-
-  async notifyRequestCommented(
-    tx: DbClient,
-    request: RequestSnapshot,
-    comment: CommentSnapshot,
-    actorUserId: string,
-    actorIsResident: boolean,
-  ) {
-    const recipients = new Set<string>();
-
-    if (actorIsResident) {
-      const managers = await this.getBuildingManagersAndAdmins(
-        tx,
-        request.buildingId,
-        request.orgId,
-      );
-      managers.forEach((id) => recipients.add(id));
-      if (request.assignedToUserId) {
-        recipients.add(request.assignedToUserId);
-      }
-    } else {
-      recipients.add(request.createdByUserId);
-    }
-
-    this.removeActor(recipients, actorUserId);
-
-    return this.notificationsRepo.createMany(
-      this.buildNotifications(
-        recipients,
-        request,
-        actorUserId,
-        NotificationTypeEnum.REQUEST_COMMENTED,
-        'New comment',
-        this.truncateMessage(comment.message),
-        { commentId: comment.id },
-      ),
-      tx,
-    );
-  }
-
-  async notifyRequestCanceled(
-    tx: DbClient,
-    request: RequestSnapshot,
-    actorUserId: string,
-  ) {
-    const recipients = await this.getBuildingManagersAndAdmins(
-      tx,
-      request.buildingId,
-      request.orgId,
-    );
-    if (request.assignedToUserId) {
-      recipients.add(request.assignedToUserId);
-    }
-    this.removeActor(recipients, actorUserId);
-
-    return this.notificationsRepo.createMany(
-      this.buildNotifications(
-        recipients,
-        request,
-        actorUserId,
-        NotificationTypeEnum.REQUEST_CANCELED,
-        'Request canceled',
-        this.buildRequestBody(request),
-      ),
-      tx,
-    );
-  }
-
-  private async getBuildingManagersAndAdmins(
-    tx: DbClient,
-    buildingId: string,
-    orgId: string,
-  ) {
-    const prisma = tx as any;
-    const assignments = await prisma.buildingAssignment.findMany({
-      where: {
-        buildingId,
-        type: { in: ['MANAGER', 'BUILDING_ADMIN'] },
-      },
-      include: { user: true },
-    });
-
-    const recipients = new Set<string>();
-    for (const assignment of assignments) {
-      const user = assignment.user;
-      if (user && user.isActive && user.orgId === orgId) {
-        recipients.add(assignment.userId);
-      }
-    }
-    return recipients;
-  }
-
-  private buildRequestBody(request: RequestSnapshot) {
-    const label = request.unit?.label;
-    if (!label) {
-      return request.title;
-    }
-    return `Unit ${label}: ${request.title}`;
-  }
-
-  private buildNotifications(
-    recipients: Set<string>,
-    request: RequestSnapshot,
-    actorUserId: string,
-    type: NotificationTypeEnum,
-    title: string,
-    body?: string,
-    extraData?: Record<string, unknown>,
-  ): NotificationInput[] {
-    const notifications: NotificationInput[] = [];
-    const unitId = request.unit?.id ?? request.unitId ?? null;
-
-    for (const recipientUserId of recipients) {
-      notifications.push({
-        orgId: request.orgId,
-        recipientUserId,
-        type,
-        title,
-        body: body ?? null,
-        data: {
-          requestId: request.id,
-          buildingId: request.buildingId,
-          unitId,
-          actorUserId,
-          status: request.status ?? undefined,
-          ...(extraData ?? {}),
-        },
+    if (updated > 0) {
+      this.realtimeService.publishToUser(orgId, userId, 'notifications:read_all', {
+        readAt,
       });
     }
-
-    return notifications;
   }
 
-  private truncateMessage(message: string) {
-    const trimmed = message.trim();
-    if (trimmed.length <= 80) {
-      return trimmed;
+  async dismiss(notificationId: string, userId: string, orgId: string) {
+    const existing = await this.notificationsRepo.findByIdForUser(
+      notificationId,
+      userId,
+      orgId,
+    );
+    if (!existing) {
+      throw new NotFoundException('Notification not found');
     }
-    return `${trimmed.slice(0, 77)}...`;
+
+    if (!existing.dismissedAt) {
+      const dismissedAt = new Date();
+      await this.notificationsRepo.markDismissed(
+        notificationId,
+        userId,
+        orgId,
+        dismissedAt,
+      );
+      this.realtimeService.publishToUser(
+        orgId,
+        userId,
+        'notifications:dismiss',
+        { id: notificationId, dismissedAt },
+      );
+    }
   }
 
-  private removeActor(recipients: Set<string>, actorUserId: string) {
-    recipients.delete(actorUserId);
+  async undismiss(notificationId: string, userId: string, orgId: string) {
+    const existing = await this.notificationsRepo.findByIdForUser(
+      notificationId,
+      userId,
+      orgId,
+    );
+    if (!existing) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    if (existing.dismissedAt) {
+      await this.notificationsRepo.clearDismissed(
+        notificationId,
+        userId,
+        orgId,
+      );
+      this.realtimeService.publishToUser(
+        orgId,
+        userId,
+        'notifications:undismiss',
+        { id: notificationId },
+      );
+    }
+  }
+
+  async countUnread(userId: string, orgId: string) {
+    return this.notificationsRepo.countUnread(userId, orgId);
+  }
+
+  private encodeCursor(notification: { id: string; createdAt: Date }) {
+    const value = `${notification.createdAt.toISOString()}|${notification.id}`;
+    return Buffer.from(value, 'utf8').toString('base64');
+  }
+
+  private decodeCursor(cursor: string) {
+    let decoded: string;
+    try {
+      decoded = Buffer.from(cursor, 'base64').toString('utf8');
+    } catch {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    const parts = decoded.split('|');
+    if (parts.length !== 2) {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    const [createdAtRaw, id] = parts;
+    if (!createdAtRaw || !id) {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    const createdAt = new Date(createdAtRaw);
+    if (Number.isNaN(createdAt.getTime())) {
+      throw new BadRequestException('Invalid cursor');
+    }
+
+    return { createdAt, id };
   }
 }

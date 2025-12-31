@@ -21,6 +21,25 @@ type CursorInfo = {
 export class NotificationsRepo {
   constructor(private readonly prisma: PrismaService) {}
 
+  async createManyAndReturn(notifications: NotificationInput[], tx?: DbClient) {
+    if (notifications.length === 0) {
+      return [];
+    }
+    const prisma = (tx ?? this.prisma) as any;
+    const created = [];
+    for (const notification of notifications) {
+      created.push(
+        await prisma.notification.create({
+          data: {
+            ...notification,
+            body: notification.body ?? null,
+          },
+        }),
+      );
+    }
+    return created;
+  }
+
   async createMany(notifications: NotificationInput[], tx?: DbClient) {
     if (notifications.length === 0) {
       return { count: 0 };
@@ -44,7 +63,12 @@ export class NotificationsRepo {
   async listForUser(
     userId: string,
     orgId: string,
-    options: { unreadOnly?: boolean; limit: number; cursor?: CursorInfo },
+    options: {
+      unreadOnly?: boolean;
+      includeDismissed?: boolean;
+      take: number;
+      cursor?: CursorInfo;
+    },
   ) {
     const prisma = this.prisma as any;
     const where: Record<string, unknown> = {
@@ -53,6 +77,9 @@ export class NotificationsRepo {
     };
     if (options.unreadOnly) {
       where.readAt = null;
+    }
+    if (!options.includeDismissed) {
+      where.dismissedAt = null;
     }
     if (options.cursor) {
       where.OR = [
@@ -67,30 +94,83 @@ export class NotificationsRepo {
     const items = await prisma.notification.findMany({
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: options.limit,
+      take: options.take,
     });
 
-    const nextCursor =
-      items.length === options.limit ? items[items.length - 1].id : undefined;
-
-    return { items, nextCursor };
+    return { items };
   }
 
-  async markRead(notificationId: string, userId: string, orgId: string) {
+  async markRead(
+    notificationId: string,
+    userId: string,
+    orgId: string,
+    readAt: Date,
+  ) {
     const prisma = this.prisma as any;
     const result = await prisma.notification.updateMany({
-      where: { id: notificationId, recipientUserId: userId, orgId },
-      data: { readAt: new Date() },
+      where: {
+        id: notificationId,
+        recipientUserId: userId,
+        orgId,
+        readAt: null,
+        dismissedAt: null,
+      },
+      data: { readAt },
     });
     return result.count as number;
   }
 
-  async markAllRead(userId: string, orgId: string) {
+  async markAllRead(userId: string, orgId: string, readAt: Date) {
     const prisma = this.prisma as any;
     const result = await prisma.notification.updateMany({
-      where: { recipientUserId: userId, orgId, readAt: null },
-      data: { readAt: new Date() },
+      where: {
+        recipientUserId: userId,
+        orgId,
+        readAt: null,
+        dismissedAt: null,
+      },
+      data: { readAt },
     });
     return result.count as number;
+  }
+
+  async markDismissed(
+    notificationId: string,
+    userId: string,
+    orgId: string,
+    dismissedAt: Date,
+  ) {
+    const prisma = this.prisma as any;
+    const result = await prisma.notification.updateMany({
+      where: {
+        id: notificationId,
+        recipientUserId: userId,
+        orgId,
+        dismissedAt: null,
+      },
+      data: { dismissedAt },
+    });
+    return result.count as number;
+  }
+
+  async clearDismissed(notificationId: string, userId: string, orgId: string) {
+    const prisma = this.prisma as any;
+    const result = await prisma.notification.updateMany({
+      where: {
+        id: notificationId,
+        recipientUserId: userId,
+        orgId,
+        dismissedAt: { not: null },
+      },
+      data: { dismissedAt: null },
+    });
+    return result.count as number;
+  }
+
+  async countUnread(userId: string, orgId: string) {
+    const prisma = this.prisma as any;
+    return prisma.notification.count({
+      where: { recipientUserId: userId, orgId, readAt: null, dismissedAt: null },
+    });
   }
 }

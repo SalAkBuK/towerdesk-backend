@@ -30,6 +30,7 @@ describe('AuthService', () => {
       findById: jest.fn(),
       createUser: jest.fn(),
       updateRefreshTokenHash: jest.fn(),
+      getRoleKeys: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<AuthRepo>;
 
     jwtService = {

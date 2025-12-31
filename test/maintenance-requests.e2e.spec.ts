@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'crypto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createValidationPipe } from '../src/common/pipes/validation.pipe';
 import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { OrgScopeGuard } from '../src/common/guards/org-scope.guard';
@@ -17,7 +18,6 @@ import { MaintenanceRequestsRepo } from '../src/modules/maintenance-requests/mai
 import { MaintenanceRequestsService } from '../src/modules/maintenance-requests/maintenance-requests.service';
 import { ResidentRequestsController } from '../src/modules/maintenance-requests/resident-requests.controller';
 import { BuildingRequestsController } from '../src/modules/maintenance-requests/building-requests.controller';
-import { NotificationsService } from '../src/modules/notifications/notifications.service';
 
 type OrgRecord = {
   id: string;
@@ -745,14 +745,8 @@ describe('Maintenance requests (integration)', () => {
         MaintenanceRequestsRepo,
         MaintenanceRequestsService,
         {
-          provide: NotificationsService,
-          useValue: {
-            notifyRequestCreated: async () => undefined,
-            notifyRequestAssigned: async () => undefined,
-            notifyRequestStatusChanged: async () => undefined,
-            notifyRequestCommented: async () => undefined,
-            notifyRequestCanceled: async () => undefined,
-          },
+          provide: EventEmitter2,
+          useValue: { emit: () => undefined },
         },
         OrgScopeGuard,
         BuildingAccessService,
@@ -1070,8 +1064,7 @@ describe('Maintenance requests (integration)', () => {
       data: {
         email: 'staff2@org.test',
         passwordHash: 'hash',
-        orgId: (await prisma.user.findUnique({ where: { id: orgAAdminId } }))
-          ?.orgId,
+        orgId: orgAdminA.orgId,
         name: 'Staff B',
         isActive: true,
       },

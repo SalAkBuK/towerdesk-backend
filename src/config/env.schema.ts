@@ -23,6 +23,8 @@ export const envSchema = z.object({
   HTTP_SERVER_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   HTTP_KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+  WS_CORS_ORIGINS: z.string().optional(),
+  WS_LOG_CONNECTIONS: z.string().optional(),
   QUEUE_ENABLED: z.string().optional(),
   QUEUE_HOST: z.string().optional(),
   QUEUE_PORT: z.coerce.number().int().optional(),

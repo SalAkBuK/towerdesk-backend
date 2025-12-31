@@ -20,6 +20,7 @@ import { AppLoggerModule } from './infra/logger/logger.module';
 import { StorageModule } from './infra/storage/storage.module';
 import { QueueModule } from './infra/queue/queue.module';
 import { MetricsModule } from './infra/metrics/metrics.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { MetricsModule } from './infra/metrics/metrics.module';
     StorageModule,
     QueueModule,
     MetricsModule,
+    EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([
       {
         name: 'default',

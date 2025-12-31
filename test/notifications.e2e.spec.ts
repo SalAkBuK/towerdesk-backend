@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'crypto';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { createValidationPipe } from '../src/common/pipes/validation.pipe';
 import { JwtAuthGuard } from '../src/common/guards/jwt-auth.guard';
 import { OrgScopeGuard } from '../src/common/guards/org-scope.guard';
@@ -21,6 +22,9 @@ import { NotificationsController } from '../src/modules/notifications/notificati
 import { NotificationsRepo } from '../src/modules/notifications/notifications.repo';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { NotificationTypeEnum } from '../src/modules/notifications/notifications.constants';
+import { NotificationsListener } from '../src/modules/notifications/notifications.listener';
+import { NotificationRecipientResolver } from '../src/modules/notifications/notification-recipient.resolver';
+import { NotificationsRealtimeService } from '../src/modules/notifications/notifications-realtime.service';
 
 type OrgRecord = {
   id: string;
@@ -124,6 +128,7 @@ type NotificationRecord = {
   body?: string | null;
   data: Record<string, unknown>;
   readAt?: Date | null;
+  dismissedAt?: Date | null;
   createdAt: Date;
 };
 
@@ -167,6 +172,21 @@ class InMemoryPrismaService {
         return this.users.find((user) => user.email === where.email) ?? null;
       }
       return null;
+    },
+    findMany: async ({
+      where,
+    }: {
+      where?: { orgId?: string; isActive?: boolean; userRoles?: unknown };
+    }) => {
+      return this.users.filter((user) => {
+        if (where?.orgId && user.orgId !== where.orgId) {
+          return false;
+        }
+        if (where?.isActive !== undefined && user.isActive !== where.isActive) {
+          return false;
+        }
+        return true;
+      });
     },
     create: async ({
       data,
@@ -543,6 +563,35 @@ class InMemoryPrismaService {
   };
 
   notification = {
+    create: async ({
+      data,
+    }: {
+      data: {
+        orgId: string;
+        recipientUserId: string;
+        type: NotificationTypeEnum;
+        title: string;
+        body?: string | null;
+        data: Record<string, unknown>;
+        createdAt?: Date;
+      };
+    }) => {
+      const now = data.createdAt ?? new Date();
+      const record: NotificationRecord = {
+        id: randomUUID(),
+        orgId: data.orgId,
+        recipientUserId: data.recipientUserId,
+        type: data.type,
+        title: data.title,
+        body: data.body ?? null,
+        data: data.data,
+        readAt: null,
+        dismissedAt: null,
+        createdAt: now,
+      };
+      this.notifications.push(record);
+      return record;
+    },
     createMany: async ({
       data,
     }: {
@@ -566,11 +615,38 @@ class InMemoryPrismaService {
           body: notification.body ?? null,
           data: notification.data,
           readAt: null,
+          dismissedAt: null,
           createdAt: now,
         };
         this.notifications.push(record);
       }
       return { count: data.length };
+    },
+    count: async ({
+      where,
+    }: {
+      where: {
+        recipientUserId: string;
+        orgId: string;
+        readAt?: null;
+        dismissedAt?: null;
+      };
+    }) => {
+      return this.notifications.filter((notification) => {
+        if (notification.recipientUserId !== where.recipientUserId) {
+          return false;
+        }
+        if (notification.orgId !== where.orgId) {
+          return false;
+        }
+        if (where.readAt === null && notification.readAt !== null) {
+          return false;
+        }
+        if (where.dismissedAt === null && notification.dismissedAt !== null) {
+          return false;
+        }
+        return true;
+      }).length;
     },
     findFirst: async ({
       where,
@@ -595,6 +671,7 @@ class InMemoryPrismaService {
         orgId: string;
         recipientUserId: string;
         readAt?: null;
+        dismissedAt?: null;
         OR?: Array<Record<string, any>>;
       };
       orderBy?: Array<Record<string, 'asc' | 'desc'>>;
@@ -607,6 +684,11 @@ class InMemoryPrismaService {
       );
       if (where.readAt === null) {
         results = results.filter((notification) => notification.readAt === null);
+      }
+      if (where.dismissedAt === null) {
+        results = results.filter(
+          (notification) => notification.dismissedAt === null,
+        );
       }
       if (where.OR) {
         const [older, same] = where.OR;
@@ -658,8 +740,14 @@ class InMemoryPrismaService {
       where,
       data,
     }: {
-      where: { id?: string; recipientUserId: string; orgId: string; readAt?: null };
-      data: { readAt: Date };
+      where: {
+        id?: string;
+        recipientUserId: string;
+        orgId: string;
+        readAt?: null;
+        dismissedAt?: null | { not: null };
+      };
+      data: { readAt?: Date | null; dismissedAt?: Date | null };
     }) => {
       let count = 0;
       for (const notification of this.notifications) {
@@ -675,7 +763,23 @@ class InMemoryPrismaService {
         if (where.readAt === null && notification.readAt !== null) {
           continue;
         }
-        notification.readAt = data.readAt;
+        if (where.dismissedAt === null && notification.dismissedAt !== null) {
+          continue;
+        }
+        if (
+          where.dismissedAt &&
+          'not' in where.dismissedAt &&
+          where.dismissedAt.not === null &&
+          notification.dismissedAt === null
+        ) {
+          continue;
+        }
+        if (data.readAt !== undefined) {
+          notification.readAt = data.readAt;
+        }
+        if (data.dismissedAt !== undefined) {
+          notification.dismissedAt = data.dismissedAt;
+        }
         count += 1;
       }
       return { count };
@@ -790,6 +894,7 @@ describe('Notifications (integration)', () => {
     prisma = new InMemoryPrismaService();
 
     const moduleRef = await Test.createTestingModule({
+      imports: [EventEmitterModule.forRoot()],
       controllers: [
         ResidentRequestsController,
         BuildingRequestsController,
@@ -800,6 +905,16 @@ describe('Notifications (integration)', () => {
         MaintenanceRequestsService,
         NotificationsRepo,
         NotificationsService,
+        NotificationsListener,
+        NotificationRecipientResolver,
+        {
+          provide: NotificationsRealtimeService,
+          useValue: {
+            publishToUser: () => undefined,
+            roomForUser: () => '',
+            setServer: () => undefined,
+          },
+        },
         OrgScopeGuard,
         BuildingAccessService,
         BuildingAccessGuard,
@@ -1168,6 +1283,109 @@ describe('Notifications (integration)', () => {
 
     const unread = await listNotifications(managerA.id, '?unreadOnly=true');
     expect(unread.items).toHaveLength(0);
+  });
+
+  it('dismiss hides a notification from default list', async () => {
+    await fetch(`${baseUrl}/resident/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': residentA.id,
+      },
+      body: JSON.stringify({ title: 'Door lock' }),
+    });
+
+    const managerNotifications = await listNotifications(managerA.id);
+    const [first] = managerNotifications.items;
+    expect(first).toBeTruthy();
+
+    const dismissResponse = await fetch(
+      `${baseUrl}/notifications/${first.id}/dismiss`,
+      {
+        method: 'POST',
+        headers: { 'x-user-id': managerA.id },
+      },
+    );
+    expect(dismissResponse.status).toBe(201);
+
+    const afterDismiss = await listNotifications(managerA.id);
+    expect(afterDismiss.items.some((item) => item.id === first.id)).toBe(false);
+
+    const includeDismissed = await listNotifications(
+      managerA.id,
+      '?includeDismissed=true',
+    );
+    const dismissed = includeDismissed.items.find(
+      (item) => item.id === first.id,
+    );
+    expect(dismissed).toBeTruthy();
+    expect(dismissed?.dismissedAt).toBeTruthy();
+
+    const undismissResponse = await fetch(
+      `${baseUrl}/notifications/${first.id}/undismiss`,
+      {
+        method: 'POST',
+        headers: { 'x-user-id': managerA.id },
+      },
+    );
+    expect(undismissResponse.status).toBe(201);
+
+    const afterUndismiss = await listNotifications(managerA.id);
+    expect(afterUndismiss.items.some((item) => item.id === first.id)).toBe(true);
+  });
+
+  it('paginates notifications with a stable cursor', async () => {
+    const base = new Date('2025-01-01T00:00:00.000Z');
+    for (let i = 0; i < 25; i += 1) {
+      await prisma.notification.create({
+        data: {
+          orgId: buildingA.orgId,
+          recipientUserId: managerA.id,
+          type: NotificationTypeEnum.REQUEST_CREATED,
+          title: `n${i}`,
+          body: null,
+          data: { index: i },
+          createdAt: new Date(base.getTime() + i * 1000),
+        },
+      });
+    }
+
+    const page1 = await listNotifications(managerA.id, '?limit=10');
+    expect(page1.items).toHaveLength(10);
+    expect(page1.nextCursor).toBeTruthy();
+
+    const page2 = await listNotifications(
+      managerA.id,
+      `?limit=10&cursor=${encodeURIComponent(page1.nextCursor ?? '')}`,
+    );
+    expect(page2.items).toHaveLength(10);
+
+    const idsPage1 = new Set(page1.items.map((item) => item.id));
+    const overlap = page2.items.some((item) => idsPage1.has(item.id));
+    expect(overlap).toBe(false);
+
+    const all = [...page1.items, ...page2.items];
+    for (let i = 1; i < all.length; i += 1) {
+      const prev = all[i - 1];
+      const curr = all[i];
+      if (prev.createdAt === curr.createdAt) {
+        expect(prev.id >= curr.id).toBe(true);
+      } else {
+        expect(new Date(prev.createdAt).getTime()).toBeGreaterThan(
+          new Date(curr.createdAt).getTime(),
+        );
+      }
+    }
+  });
+
+  it('returns 400 for invalid cursor', async () => {
+    const response = await fetch(
+      `${baseUrl}/notifications?cursor=not-base64`,
+      {
+        headers: { 'x-user-id': managerA.id },
+      },
+    );
+    expect(response.status).toBe(400);
   });
 
   it('cross-org users cannot read or mark notifications', async () => {

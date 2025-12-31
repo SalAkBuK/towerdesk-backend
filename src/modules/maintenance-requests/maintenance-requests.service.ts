@@ -17,7 +17,6 @@ import { AuthenticatedUser } from '../../common/types/request-context';
 import { assertOrgScope } from '../../common/utils/org-scope';
 import { BuildingAccessService } from '../../common/building-access/building-access.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
-import { NotificationsService } from '../notifications/notifications.service';
 import { MaintenanceRequestsRepo } from './maintenance-requests.repo';
 import { CreateResidentRequestDto } from './dto/create-resident-request.dto';
 import { UpdateResidentRequestDto } from './dto/update-resident-request.dto';
@@ -29,6 +28,12 @@ import {
   MaintenanceRequestStatusEnum,
   MAINTENANCE_STATUS_TRANSITIONS,
 } from './maintenance-requests.constants';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  MAINTENANCE_REQUEST_EVENTS,
+  MaintenanceRequestEventPayload,
+  MaintenanceRequestSnapshot,
+} from './maintenance-requests.events';
 
 @Injectable()
 export class MaintenanceRequestsService {
@@ -37,7 +42,7 @@ export class MaintenanceRequestsService {
     private readonly requestsRepo: MaintenanceRequestsRepo,
     private readonly buildingAccessService: BuildingAccessService,
     private readonly accessControlService: AccessControlService,
-    private readonly notificationsService: NotificationsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async createResidentRequest(
@@ -50,7 +55,7 @@ export class MaintenanceRequestsService {
       throw new UnauthorizedException('Unauthorized');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const request = await this.prisma.$transaction(async (tx) => {
       const occupancy = await this.requestsRepo.findAssignedActiveOccupancy(
         userId,
         tx,
@@ -84,11 +89,15 @@ export class MaintenanceRequestsService {
         attachments,
         tx,
       );
-
-      await this.notificationsService.notifyRequestCreated(tx, request, userId);
-
       return request;
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.CREATED, {
+      request: this.toEventRequest(request),
+      actorUserId: userId,
+    });
+
+    return request;
   }
 
   async listResidentRequests(user: AuthenticatedUser | undefined) {
@@ -161,7 +170,7 @@ export class MaintenanceRequestsService {
       throw new UnauthorizedException('Unauthorized');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const request = await this.requestsRepo.findByIdForCreator(
         orgId,
         userId,
@@ -186,15 +195,15 @@ export class MaintenanceRequestsService {
         },
         tx,
       );
-
-      await this.notificationsService.notifyRequestCanceled(
-        tx,
-        updated,
-        userId,
-      );
-
       return updated;
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.CANCELED, {
+      request: this.toEventRequest(updated),
+      actorUserId: userId,
+    });
+
+    return updated;
   }
 
   async addResidentComment(
@@ -208,7 +217,7 @@ export class MaintenanceRequestsService {
       throw new UnauthorizedException('Unauthorized');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const { request, comment } = await this.prisma.$transaction(async (tx) => {
       const request = await this.requestsRepo.findByIdForCreator(
         orgId,
         userId,
@@ -235,16 +244,17 @@ export class MaintenanceRequestsService {
         tx,
       );
 
-      await this.notificationsService.notifyRequestCommented(
-        tx,
-        request,
-        comment,
-        userId,
-        true,
-      );
-
-      return comment;
+      return { request, comment };
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.COMMENTED, {
+      request: this.toEventRequest(request),
+      actorUserId: userId,
+      actorIsResident: true,
+      comment: { id: comment.id, message: comment.message },
+    });
+
+    return comment;
   }
 
   async listResidentComments(
@@ -373,7 +383,7 @@ export class MaintenanceRequestsService {
       throw new ForbiddenException('Staff cannot assign requests');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const request = await this.requestsRepo.findByIdForBuilding(
         orgId,
         buildingId,
@@ -416,15 +426,15 @@ export class MaintenanceRequestsService {
         },
         tx,
       );
-
-      await this.notificationsService.notifyRequestAssigned(
-        tx,
-        updated,
-        userId,
-      );
-
       return updated;
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.ASSIGNED, {
+      request: this.toEventRequest(updated),
+      actorUserId: userId,
+    });
+
+    return updated;
   }
 
   async updateRequestStatus(
@@ -447,7 +457,7 @@ export class MaintenanceRequestsService {
         userId,
       );
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const request = await this.requestsRepo.findByIdForBuilding(
         orgId,
         buildingId,
@@ -482,15 +492,15 @@ export class MaintenanceRequestsService {
         },
         tx,
       );
-
-      await this.notificationsService.notifyRequestStatusChanged(
-        tx,
-        updated,
-        userId,
-      );
-
       return updated;
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.STATUS_CHANGED, {
+      request: this.toEventRequest(updated),
+      actorUserId: userId,
+    });
+
+    return updated;
   }
 
   async cancelBuildingRequest(
@@ -526,7 +536,7 @@ export class MaintenanceRequestsService {
       throw new ForbiddenException('Staff cannot cancel requests');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const request = await this.requestsRepo.findByIdForBuilding(
         orgId,
         buildingId,
@@ -551,15 +561,15 @@ export class MaintenanceRequestsService {
         },
         tx,
       );
-
-      await this.notificationsService.notifyRequestCanceled(
-        tx,
-        updated,
-        userId,
-      );
-
       return updated;
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.CANCELED, {
+      request: this.toEventRequest(updated),
+      actorUserId: userId,
+    });
+
+    return updated;
   }
 
   async addBuildingComment(
@@ -582,7 +592,7 @@ export class MaintenanceRequestsService {
         userId,
       );
 
-    return this.prisma.$transaction(async (tx) => {
+    const { request, comment } = await this.prisma.$transaction(async (tx) => {
       const request = await this.requestsRepo.findByIdForBuilding(
         orgId,
         buildingId,
@@ -610,16 +620,17 @@ export class MaintenanceRequestsService {
         tx,
       );
 
-      await this.notificationsService.notifyRequestCommented(
-        tx,
-        request,
-        comment,
-        userId,
-        false,
-      );
-
-      return comment;
+      return { request, comment };
     });
+
+    this.emitEvent(MAINTENANCE_REQUEST_EVENTS.COMMENTED, {
+      request: this.toEventRequest(request),
+      actorUserId: userId,
+      actorIsResident: false,
+      comment: { id: comment.id, message: comment.message },
+    });
+
+    return comment;
   }
 
   async listBuildingComments(
@@ -774,5 +785,33 @@ export class MaintenanceRequestsService {
       default:
         return undefined;
     }
+  }
+
+  private toEventRequest(request: {
+    id: string;
+    orgId: string;
+    buildingId: string;
+    unitId?: string | null;
+    title: string;
+    status?: string | null;
+    createdByUserId: string;
+    assignedToUserId?: string | null;
+    unit?: { id: string; label: string } | null;
+  }): MaintenanceRequestSnapshot {
+    return {
+      id: request.id,
+      orgId: request.orgId,
+      buildingId: request.buildingId,
+      unitId: request.unitId ?? null,
+      title: request.title,
+      status: request.status ?? null,
+      createdByUserId: request.createdByUserId,
+      assignedToUserId: request.assignedToUserId ?? null,
+      unit: request.unit ? { id: request.unit.id, label: request.unit.label } : null,
+    };
+  }
+
+  private emitEvent(event: string, payload: MaintenanceRequestEventPayload) {
+    this.eventEmitter.emit(event, payload);
   }
 }

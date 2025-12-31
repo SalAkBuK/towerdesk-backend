@@ -325,18 +325,30 @@ GET `/org/buildings/:buildingId/requests/:requestId/comments`
 ## Notifications
 
 GET `/notifications`
-- Query: `unreadOnly=true` (optional), `cursor` (optional), `limit` (optional)
-- Returns: `{ items: [{ id, type, title, body?, data, readAt?, createdAt }], nextCursor? }`
+  - Query: `unreadOnly=true` (optional), `includeDismissed=true` (optional), `cursor` (optional), `limit` (optional)
+  - Returns: `{ items: [{ id, type, title, body?, data, readAt?, dismissedAt?, createdAt }], nextCursor? }`
+  - `limit` defaults to 20, max 100
+  - Cursor format: base64 of `${createdAt.toISOString()}|${id}`
 - Only returns notifications for the current user and org.
 
 POST `/notifications/:id/read`
-- Marks a single notification as read
-- Returns `{ success: true }`
-- 404 if the notification is not owned by the user/org
+  - Marks a single notification as read
+  - Returns `{ success: true }`
+  - 404 if the notification is not owned by the user/org
+
+POST `/notifications/:id/dismiss`
+  - Hides a single notification for the current user
+  - Returns `{ success: true }`
+  - 404 if the notification is not owned by the user/org
+
+POST `/notifications/:id/undismiss`
+  - Restores a dismissed notification for the current user
+  - Returns `{ success: true }`
+  - 404 if the notification is not owned by the user/org
 
 POST `/notifications/read-all`
 - Marks all unread notifications for the user as read
-- Returns `{ success: true }`
+  - Returns `{ success: true }`
 
 Notification types (maintenance requests):
 - `REQUEST_CREATED`

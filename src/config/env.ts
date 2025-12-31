@@ -21,6 +21,10 @@ export const env = {
       : parsed.data.NODE_ENV === 'production',
   PRISMA_APPLY_SESSION_TIMEOUTS:
     parsed.data.PRISMA_APPLY_SESSION_TIMEOUTS === 'true',
+  WS_LOG_CONNECTIONS:
+    parsed.data.WS_LOG_CONNECTIONS !== undefined
+      ? parsed.data.WS_LOG_CONNECTIONS === 'true'
+      : true,
 };
 
 export type Env = typeof env;

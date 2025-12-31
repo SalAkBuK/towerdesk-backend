@@ -30,6 +30,7 @@ export class NotificationsController {
       orgId,
       {
         unreadOnly: query.unreadOnly,
+        includeDismissed: query.includeDismissed,
         cursor: query.cursor,
         limit: query.limit,
       },
@@ -59,6 +60,28 @@ export class NotificationsController {
     @CurrentUser('orgId') orgId: string,
   ) {
     await this.notificationsService.markAllRead(userId, orgId);
+    return { success: true };
+  }
+
+  @Post(':id/dismiss')
+  @ApiOkResponse({ type: NotificationActionResponseDto })
+  async dismiss(
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('orgId') orgId: string,
+    @Param('id') notificationId: string,
+  ) {
+    await this.notificationsService.dismiss(notificationId, userId, orgId);
+    return { success: true };
+  }
+
+  @Post(':id/undismiss')
+  @ApiOkResponse({ type: NotificationActionResponseDto })
+  async undismiss(
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('orgId') orgId: string,
+    @Param('id') notificationId: string,
+  ) {
+    await this.notificationsService.undismiss(notificationId, userId, orgId);
     return { success: true };
   }
 }
