@@ -22,12 +22,6 @@ import { PlatformOrgsService } from '../src/modules/platform/platform-orgs.servi
 import { UnitsController } from '../src/modules/units/units.controller';
 import { UnitsRepo } from '../src/modules/units/units.repo';
 import { UnitsService } from '../src/modules/units/units.service';
-import { UnitTypesController } from '../src/modules/unit-types/unit-types.controller';
-import { UnitTypesRepo } from '../src/modules/unit-types/unit-types.repo';
-import { UnitTypesService } from '../src/modules/unit-types/unit-types.service';
-import { OwnersController } from '../src/modules/owners/owners.controller';
-import { OwnersRepo } from '../src/modules/owners/owners.repo';
-import { OwnersService } from '../src/modules/owners/owners.service';
 import { BuildingAmenitiesController } from '../src/modules/building-amenities/building-amenities.controller';
 import { BuildingAmenitiesRepo } from '../src/modules/building-amenities/building-amenities.repo';
 import { BuildingAmenitiesService } from '../src/modules/building-amenities/building-amenities.service';
@@ -103,46 +97,8 @@ type UnitRecord = {
   id: string;
   buildingId: string;
   label: string;
-  unitTypeId?: string | null;
-  ownerId?: string | null;
-  maintenancePayer?: string | null;
-  unitSize?: number | null;
-  unitSizeUnit?: string | null;
-  bedrooms?: number | null;
-  bathrooms?: number | null;
-  balcony?: boolean | null;
-  kitchenType?: string | null;
-  furnishedStatus?: string | null;
-  rentAnnual?: number | null;
-  paymentFrequency?: string | null;
-  securityDepositAmount?: number | null;
-  serviceChargePerUnit?: number | null;
-  vatApplicable?: boolean | null;
-  electricityMeterNumber?: string | null;
-  waterMeterNumber?: string | null;
-  gasMeterNumber?: string | null;
   floor?: number | null;
   notes?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-type UnitTypeRecord = {
-  id: string;
-  orgId: string;
-  name: string;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-type OwnerRecord = {
-  id: string;
-  orgId: string;
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  address?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -155,11 +111,9 @@ class InMemoryPrismaService {
   private users: UserRecord[] = [];
   private userRoles: UserRoleRecord[] = [];
   private buildings: BuildingRecord[] = [];
+  private units: UnitRecord[] = [];
   private buildingAmenities: BuildingAmenityRecord[] = [];
   private unitAmenities: UnitAmenityRecord[] = [];
-  private units: UnitRecord[] = [];
-  private unitTypes: UnitTypeRecord[] = [];
-  private owners: OwnerRecord[] = [];
 
   org = {
     findUnique: async ({ where }: { where: { id: string } }) => {
@@ -276,9 +230,6 @@ class InMemoryPrismaService {
       this.buildings.push(building);
       return building;
     },
-    findMany: async ({ where }: { where: { orgId: string } }) => {
-      return this.buildings.filter((building) => building.orgId === where.orgId);
-    },
     findFirst: async ({
       where,
     }: {
@@ -300,61 +251,15 @@ class InMemoryPrismaService {
       data: {
         buildingId: string;
         label: string;
-        unitTypeId?: string;
-        ownerId?: string;
-        maintenancePayer?: string;
-        unitSize?: number;
-        unitSizeUnit?: string;
-        bedrooms?: number;
-        bathrooms?: number;
-        balcony?: boolean;
-        kitchenType?: string;
-        furnishedStatus?: string;
-        rentAnnual?: number;
-        paymentFrequency?: string;
-        securityDepositAmount?: number;
-        serviceChargePerUnit?: number;
-        vatApplicable?: boolean;
-        electricityMeterNumber?: string;
-        waterMeterNumber?: string;
-        gasMeterNumber?: string;
         floor?: number;
         notes?: string;
       };
     }) => {
-      const exists = this.units.find(
-        (unit) =>
-          unit.buildingId === data.buildingId && unit.label === data.label,
-      );
-      if (exists) {
-        const error = new Error('Unique constraint failed');
-        (error as { code?: string }).code = 'P2002';
-        throw error;
-      }
-
       const now = new Date();
       const unit: UnitRecord = {
         id: randomUUID(),
         buildingId: data.buildingId,
         label: data.label,
-        unitTypeId: data.unitTypeId ?? null,
-        ownerId: data.ownerId ?? null,
-        maintenancePayer: data.maintenancePayer ?? null,
-        unitSize: data.unitSize ?? null,
-        unitSizeUnit: data.unitSizeUnit ?? null,
-        bedrooms: data.bedrooms ?? null,
-        bathrooms: data.bathrooms ?? null,
-        balcony: data.balcony ?? null,
-        kitchenType: data.kitchenType ?? null,
-        furnishedStatus: data.furnishedStatus ?? null,
-        rentAnnual: data.rentAnnual ?? null,
-        paymentFrequency: data.paymentFrequency ?? null,
-        securityDepositAmount: data.securityDepositAmount ?? null,
-        serviceChargePerUnit: data.serviceChargePerUnit ?? null,
-        vatApplicable: data.vatApplicable ?? null,
-        electricityMeterNumber: data.electricityMeterNumber ?? null,
-        waterMeterNumber: data.waterMeterNumber ?? null,
-        gasMeterNumber: data.gasMeterNumber ?? null,
         floor: data.floor ?? null,
         notes: data.notes ?? null,
         createdAt: now,
@@ -363,19 +268,18 @@ class InMemoryPrismaService {
       this.units.push(unit);
       return unit;
     },
-    findMany: async ({ where }: { where: { buildingId: string } }) => {
-      return this.units.filter((unit) => unit.buildingId === where.buildingId);
-    },
     findFirst: async ({
       where,
       include,
     }: {
-      where: { id: string; buildingId: string };
+      where: { id?: string; buildingId: string };
       include?: { amenities?: { include?: { amenity?: boolean } } };
     }) => {
       const unit =
         this.units.find(
-          (unit) => unit.id === where.id && unit.buildingId === where.buildingId,
+          (entry) =>
+            entry.buildingId === where.buildingId &&
+            (where.id ? entry.id === where.id : true),
         ) ?? null;
       if (!unit) {
         return null;
@@ -392,25 +296,6 @@ class InMemoryPrismaService {
         ...unit,
         amenities,
       };
-    },
-    update: async ({
-      where,
-      data,
-    }: {
-      where: { id: string };
-      data: Partial<UnitRecord>;
-    }) => {
-      const index = this.units.findIndex((unit) => unit.id === where.id);
-      if (index === -1) {
-        throw new Error('Unit not found');
-      }
-      const updated: UnitRecord = {
-        ...this.units[index],
-        ...data,
-        updatedAt: new Date(),
-      };
-      this.units[index] = updated;
-      return updated;
     },
     findUnique: async ({ where }: { where: { id: string } }) => {
       return this.units.find((unit) => unit.id === where.id) ?? null;
@@ -537,133 +422,15 @@ class InMemoryPrismaService {
     return arg(this);
   }
 
-  unitType = {
-    findFirst: async ({
-      where,
-    }: {
-      where: { id: string; orgId: string };
-    }) => {
-      return (
-        this.unitTypes.find(
-          (unitType) =>
-            unitType.id === where.id && unitType.orgId === where.orgId,
-        ) ?? null
-      );
-    },
-    findMany: async ({
-      where,
-    }: {
-      where: { orgId: string; isActive?: boolean };
-    }) => {
-      return this.unitTypes.filter(
-        (unitType) =>
-          unitType.orgId === where.orgId &&
-          (where.isActive === undefined || unitType.isActive === where.isActive),
-      );
-    },
-    create: async ({
-      data,
-    }: {
-      data: { orgId: string; name: string; isActive?: boolean };
-    }) => {
-      const exists = this.unitTypes.find(
-        (unitType) =>
-          unitType.orgId === data.orgId && unitType.name === data.name,
-      );
-      if (exists) {
-        const error = new Error('Unique constraint failed');
-        (error as { code?: string }).code = 'P2002';
-        throw error;
-      }
-      const now = new Date();
-      const unitType: UnitTypeRecord = {
-        id: randomUUID(),
-        orgId: data.orgId,
-        name: data.name,
-        isActive: data.isActive ?? true,
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.unitTypes.push(unitType);
-      return unitType;
-    },
-  };
-
-  owner = {
-    findFirst: async ({
-      where,
-    }: {
-      where: { id: string; orgId: string };
-    }) => {
-      return (
-        this.owners.find(
-          (owner) => owner.id === where.id && owner.orgId === where.orgId,
-        ) ?? null
-      );
-    },
-    findMany: async ({
-      where,
-    }: {
-      where: { orgId: string; OR?: Array<Record<string, unknown>> };
-    }) => {
-      const base = this.owners.filter((owner) => owner.orgId === where.orgId);
-      if (!where.OR) {
-        return base;
-      }
-      const search = where.OR
-        .map((entry) => Object.values(entry)[0])
-        .find((value) => typeof value === 'object' && value !== null) as
-        | { contains?: string }
-        | undefined;
-      const term = search?.contains?.toLowerCase();
-      if (!term) {
-        return base;
-      }
-      return base.filter((owner) => {
-        const fields = [owner.name, owner.email, owner.phone, owner.address];
-        return fields.some((value) =>
-          value ? value.toLowerCase().includes(term) : false,
-        );
-      });
-    },
-    create: async ({
-      data,
-    }: {
-      data: {
-        orgId: string;
-        name: string;
-        email?: string;
-        phone?: string;
-        address?: string;
-      };
-    }) => {
-      const now = new Date();
-      const owner: OwnerRecord = {
-        id: randomUUID(),
-        orgId: data.orgId,
-        name: data.name,
-        email: data.email ?? null,
-        phone: data.phone ?? null,
-        address: data.address ?? null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.owners.push(owner);
-      return owner;
-    },
-  };
-
   reset() {
     this.orgs = [];
     this.roles = [];
     this.users = [];
     this.userRoles = [];
     this.buildings = [];
+    this.units = [];
     this.buildingAmenities = [];
     this.unitAmenities = [];
-    this.units = [];
-    this.unitTypes = [];
-    this.owners = [];
   }
 
   seedOrgAdminRole() {
@@ -711,11 +478,10 @@ class AllowPermissionsGuard implements CanActivate {
   }
 }
 
-describe('Org Units (integration)', () => {
+describe('Building amenities (integration)', () => {
   let app: INestApplication;
   let baseUrl: string;
   let orgAAdminId: string;
-  let orgBAdminId: string;
   let buildingId: string;
 
   const platformKey = process.env.PLATFORM_API_KEY ?? 'test-platform-key';
@@ -728,8 +494,6 @@ describe('Org Units (integration)', () => {
         PlatformOrgsController,
         BuildingsController,
         UnitsController,
-        UnitTypesController,
-        OwnersController,
         BuildingAmenitiesController,
       ],
       providers: [
@@ -738,10 +502,6 @@ describe('Org Units (integration)', () => {
         BuildingsRepo,
         UnitsService,
         UnitsRepo,
-        UnitTypesService,
-        UnitTypesRepo,
-        OwnersService,
-        OwnersRepo,
         BuildingAmenitiesService,
         BuildingAmenitiesRepo,
         OrgScopeGuard,
@@ -794,16 +554,6 @@ describe('Org Units (integration)', () => {
     });
     const orgABody = await orgAResponse.json();
 
-    const orgBResponse = await fetch(`${baseUrl}/platform/orgs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-platform-key': platformKey,
-      },
-      body: JSON.stringify({ name: 'Org B' }),
-    });
-    const orgBBody = await orgBResponse.json();
-
     const orgAAdminResponse = await fetch(
       `${baseUrl}/platform/orgs/${orgABody.id}/admins`,
       {
@@ -821,23 +571,6 @@ describe('Org Units (integration)', () => {
     const orgAAdminBody = await orgAAdminResponse.json();
     orgAAdminId = orgAAdminBody.userId;
 
-    const orgBAdminResponse = await fetch(
-      `${baseUrl}/platform/orgs/${orgBBody.id}/admins`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-platform-key': platformKey,
-        },
-        body: JSON.stringify({
-          name: 'Org B Admin',
-          email: 'admin-b@org.test',
-        }),
-      },
-    );
-    const orgBAdminBody = await orgBAdminResponse.json();
-    orgBAdminId = orgBAdminBody.userId;
-
     const buildingResponse = await fetch(`${baseUrl}/org/buildings`, {
       method: 'POST',
       headers: {
@@ -850,7 +583,21 @@ describe('Org Units (integration)', () => {
     buildingId = buildingBody.id;
   });
 
-  it('org admin can create and list units', async () => {
+  it('applies default amenities when amenityIds is omitted', async () => {
+    const amenityResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/amenities`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': orgAAdminId,
+        },
+        body: JSON.stringify({ name: 'Balcony', isDefault: true }),
+      },
+    );
+    expect(amenityResponse.status).toBe(201);
+    const amenityBody = await amenityResponse.json();
+
     const createResponse = await fetch(
       `${baseUrl}/org/buildings/${buildingId}/units`,
       {
@@ -859,177 +606,35 @@ describe('Org Units (integration)', () => {
           'Content-Type': 'application/json',
           'x-user-id': orgAAdminId,
         },
-        body: JSON.stringify({ label: 'A-101', floor: 1 }),
+        body: JSON.stringify({ label: 'C-301' }),
       },
     );
-
     expect(createResponse.status).toBe(201);
     const createBody = await createResponse.json();
-    expect(createBody.label).toBe('A-101');
-
-    const listResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units`,
-      {
-        headers: { 'x-user-id': orgAAdminId },
-      },
-    );
-
-    expect(listResponse.status).toBe(200);
-    const listBody = await listResponse.json();
-    expect(listBody).toHaveLength(1);
-  });
-
-  it('creates units with extended fields and returns full detail', async () => {
-    const unitTypeResponse = await fetch(`${baseUrl}/org/unit-types`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': orgAAdminId,
-      },
-      body: JSON.stringify({ name: 'Apartment' }),
-    });
-    expect(unitTypeResponse.status).toBe(201);
-    const unitTypeBody = await unitTypeResponse.json();
-
-    const ownerResponse = await fetch(`${baseUrl}/org/owners`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': orgAAdminId,
-      },
-      body: JSON.stringify({
-        name: 'Jane Owner',
-        email: 'jane@owner.test',
-        phone: '+971555000111',
-        address: 'Owner Address',
-      }),
-    });
-    expect(ownerResponse.status).toBe(201);
-    const ownerBody = await ownerResponse.json();
-
-    const createResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': orgAAdminId,
-        },
-        body: JSON.stringify({
-          label: 'B-202',
-          floor: 2,
-          unitTypeId: unitTypeBody.id,
-          ownerId: ownerBody.id,
-          maintenancePayer: 'OWNER',
-          unitSize: 950,
-          unitSizeUnit: 'SQ_FT',
-          bedrooms: 2,
-          bathrooms: 2,
-          balcony: true,
-          kitchenType: 'OPEN',
-          furnishedStatus: 'FULLY_FURNISHED',
-          rentAnnual: 120000,
-          paymentFrequency: 'MONTHLY',
-          securityDepositAmount: 5000,
-          serviceChargePerUnit: 1500,
-          vatApplicable: true,
-          electricityMeterNumber: 'ELEC-123',
-          waterMeterNumber: 'WATER-456',
-          gasMeterNumber: 'GAS-789',
-        }),
-      },
-    );
-
-    expect(createResponse.status).toBe(201);
-    const createdUnit = await createResponse.json();
 
     const detailResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units/${createdUnit.id}`,
+      `${baseUrl}/org/buildings/${buildingId}/units/${createBody.id}`,
       {
         headers: { 'x-user-id': orgAAdminId },
       },
     );
     expect(detailResponse.status).toBe(200);
     const detailBody = await detailResponse.json();
-    expect(detailBody.unitTypeId).toBe(unitTypeBody.id);
-    expect(detailBody.ownerId).toBe(ownerBody.id);
-    expect(detailBody.maintenancePayer).toBe('OWNER');
-    expect(detailBody.unitSize).toBe('950');
-    expect(detailBody.unitSizeUnit).toBe('SQ_FT');
-    expect(detailBody.balcony).toBe(true);
-    expect(detailBody.rentAnnual).toBe('120000');
-    expect(detailBody.vatApplicable).toBe(true);
+    expect(detailBody.amenityIds).toEqual([amenityBody.id]);
+    expect(detailBody.amenities).toEqual([
+      { id: amenityBody.id, name: amenityBody.name },
+    ]);
   });
 
-  it('returns basic units with id and label only', async () => {
-    await fetch(`${baseUrl}/org/buildings/${buildingId}/units`, {
+  it('does not apply defaults when amenityIds is empty', async () => {
+    await fetch(`${baseUrl}/org/buildings/${buildingId}/amenities`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-user-id': orgAAdminId,
       },
-      body: JSON.stringify({ label: 'B-101' }),
+      body: JSON.stringify({ name: 'Gym', isDefault: true }),
     });
-
-    const listResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units/basic`,
-      {
-        headers: { 'x-user-id': orgAAdminId },
-      },
-    );
-    expect(listResponse.status).toBe(200);
-    const listBody = await listResponse.json();
-    expect(listBody).toHaveLength(1);
-    expect(Object.keys(listBody[0]).sort()).toEqual(['id', 'label']);
-  });
-
-  it('creates and lists unit types and owners', async () => {
-    const createTypeResponse = await fetch(`${baseUrl}/org/unit-types`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': orgAAdminId,
-      },
-      body: JSON.stringify({ name: 'Office' }),
-    });
-    expect(createTypeResponse.status).toBe(201);
-
-    const listTypesResponse = await fetch(`${baseUrl}/org/unit-types`, {
-      headers: { 'x-user-id': orgAAdminId },
-    });
-    expect(listTypesResponse.status).toBe(200);
-    const unitTypesBody = await listTypesResponse.json();
-    expect(unitTypesBody).toHaveLength(1);
-
-    const createOwnerResponse = await fetch(`${baseUrl}/org/owners`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': orgAAdminId,
-      },
-      body: JSON.stringify({ name: 'Owner One', email: 'owner@org.test' }),
-    });
-    expect(createOwnerResponse.status).toBe(201);
-
-    const listOwnersResponse = await fetch(
-      `${baseUrl}/org/owners?search=owner`,
-      {
-        headers: { 'x-user-id': orgAAdminId },
-      },
-    );
-    expect(listOwnersResponse.status).toBe(200);
-    const ownersBody = await listOwnersResponse.json();
-    expect(ownersBody).toHaveLength(1);
-  });
-
-  it('org b admin cannot access org a building or units', async () => {
-    const detailResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}`,
-      {
-        headers: { 'x-user-id': orgBAdminId },
-      },
-    );
-    expect(detailResponse.status).toBe(404);
 
     const createResponse = await fetch(
       `${baseUrl}/org/buildings/${buildingId}/units`,
@@ -1037,60 +642,142 @@ describe('Org Units (integration)', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': orgBAdminId,
+          'x-user-id': orgAAdminId,
         },
-        body: JSON.stringify({ label: 'B-201' }),
+        body: JSON.stringify({ label: 'C-302', amenityIds: [] }),
       },
     );
-    expect(createResponse.status).toBe(404);
+    expect(createResponse.status).toBe(201);
+    const createBody = await createResponse.json();
 
-    const listResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units`,
+    const detailResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/units/${createBody.id}`,
       {
-        headers: { 'x-user-id': orgBAdminId },
+        headers: { 'x-user-id': orgAAdminId },
       },
     );
-    expect(listResponse.status).toBe(404);
+    expect(detailResponse.status).toBe(200);
+    const detailBody = await detailResponse.json();
+    expect(detailBody.amenityIds).toEqual([]);
   });
 
-  it('returns 409 for duplicate unit labels in same building', async () => {
-    await fetch(`${baseUrl}/org/buildings/${buildingId}/units`, {
+  it('replaces amenityIds on patch and rejects cross-building amenities', async () => {
+    const amenityResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/amenities`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': orgAAdminId,
+        },
+        body: JSON.stringify({ name: 'Parking' }),
+      },
+    );
+    const amenityBody = await amenityResponse.json();
+
+    const otherAmenityResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/amenities`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': orgAAdminId,
+        },
+        body: JSON.stringify({ name: 'Pool' }),
+      },
+    );
+    const otherAmenityBody = await otherAmenityResponse.json();
+
+    const createResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/units`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': orgAAdminId,
+        },
+        body: JSON.stringify({ label: 'C-303', amenityIds: [amenityBody.id] }),
+      },
+    );
+    const createBody = await createResponse.json();
+
+    const patchResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/units/${createBody.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': orgAAdminId,
+        },
+        body: JSON.stringify({ amenityIds: [otherAmenityBody.id] }),
+      },
+    );
+    expect(patchResponse.status).toBe(200);
+
+    const detailResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/units/${createBody.id}`,
+      {
+        headers: { 'x-user-id': orgAAdminId },
+      },
+    );
+    const detailBody = await detailResponse.json();
+    expect(detailBody.amenityIds).toEqual([otherAmenityBody.id]);
+
+    const buildingResponse = await fetch(`${baseUrl}/org/buildings`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-user-id': orgAAdminId,
       },
-      body: JSON.stringify({ label: 'A-101' }),
+      body: JSON.stringify({ name: 'Secondary Tower', city: 'Dubai' }),
     });
+    const buildingBody = await buildingResponse.json();
 
-    const duplicateResponse = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units`,
+    const crossAmenityResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingBody.id}/amenities`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': orgAAdminId,
         },
-        body: JSON.stringify({ label: 'A-101' }),
+        body: JSON.stringify({ name: 'Garden' }),
       },
     );
+    const crossAmenityBody = await crossAmenityResponse.json();
 
-    expect(duplicateResponse.status).toBe(409);
+    const crossPatch = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/units/${createBody.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': orgAAdminId,
+        },
+        body: JSON.stringify({ amenityIds: [crossAmenityBody.id] }),
+      },
+    );
+    expect(crossPatch.status).toBe(400);
   });
 
-  it('returns 400 for invalid payloads', async () => {
-    const response = await fetch(
-      `${baseUrl}/org/buildings/${buildingId}/units`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': orgAAdminId,
-        },
-        body: JSON.stringify({}),
+  it('lists building amenities with isDefault flags', async () => {
+    await fetch(`${baseUrl}/org/buildings/${buildingId}/amenities`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': orgAAdminId,
       },
-    );
+      body: JSON.stringify({ name: 'Gym', isDefault: true }),
+    });
 
-    expect(response.status).toBe(400);
+    const listResponse = await fetch(
+      `${baseUrl}/org/buildings/${buildingId}/amenities`,
+      { headers: { 'x-user-id': orgAAdminId } },
+    );
+    expect(listResponse.status).toBe(200);
+    const listBody = await listResponse.json();
+    expect(listBody[0]).toEqual(
+      expect.objectContaining({ name: 'Gym', isDefault: true }),
+    );
   });
 });

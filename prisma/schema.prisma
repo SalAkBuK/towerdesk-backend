@@ -39,14 +39,33 @@ model Org {
   id        String     @id @default(uuid())
   name      String
   logoUrl   String?
+  businessName String?
+  businessType OrgBusinessType?
+  tradeLicenseNumber String?
+  vatRegistrationNumber String?
+  registeredOfficeAddress String?
+  city String?
+  officePhoneNumber String?
+  businessEmailAddress String?
+  website String?
+  ownerName String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   users     User[]
   buildings Building[]
+  unitTypes UnitType[]
+  owners    Owner[]
   maintenanceRequests MaintenanceRequest[]
   maintenanceRequestComments MaintenanceRequestComment[]
   maintenanceRequestAttachments MaintenanceRequestAttachment[]
   notifications Notification[]
+}
+
+enum OrgBusinessType {
+  OWNER
+  PROPERTY_MANAGEMENT
+  FACILITY_MANAGEMENT
+  DEVELOPER
 }
 
 model Building {
@@ -63,6 +82,7 @@ model Building {
   updatedAt DateTime @updatedAt
   org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   units     Unit[]
+  amenities BuildingAmenity[]
   assignments BuildingAssignment[]
   occupancies Occupancy[]
   maintenanceRequests MaintenanceRequest[]
@@ -74,16 +94,119 @@ model Unit {
   id         String   @id @default(uuid())
   buildingId String
   label      String
+  unitTypeId String?
+  ownerId    String?
   floor      Int?
   notes      String?
+  maintenancePayer MaintenancePayer?
+  unitSize   Decimal? @db.Decimal(12, 2)
+  unitSizeUnit UnitSizeUnit?
+  bedrooms   Int?
+  bathrooms  Int?
+  balcony    Boolean?
+  kitchenType KitchenType?
+  furnishedStatus FurnishedStatus?
+  rentAnnual Decimal? @db.Decimal(12, 2)
+  paymentFrequency PaymentFrequency?
+  securityDepositAmount Decimal? @db.Decimal(12, 2)
+  serviceChargePerUnit Decimal? @db.Decimal(12, 2)
+  vatApplicable Boolean?
+  electricityMeterNumber String?
+  waterMeterNumber String?
+  gasMeterNumber String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   building   Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  unitType   UnitType? @relation(fields: [unitTypeId], references: [id], onDelete: SetNull)
+  owner      Owner? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  amenities UnitAmenity[]
   occupancies Occupancy[]
   maintenanceRequests MaintenanceRequest[]
 
   @@unique([buildingId, label])
   @@index([buildingId])
+}
+
+model BuildingAmenity {
+  id         String   @id @default(uuid())
+  buildingId String
+  name       String
+  isActive   Boolean  @default(true)
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  building   Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  unitLinks  UnitAmenity[]
+
+  @@unique([buildingId, name])
+  @@index([buildingId])
+}
+
+model UnitAmenity {
+  unitId    String
+  amenityId String
+  createdAt DateTime @default(now())
+  unit      Unit            @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  amenity   BuildingAmenity @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@id([unitId, amenityId])
+  @@index([amenityId])
+}
+
+model UnitType {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  units     Unit[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model Owner {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  units     Unit[]
+
+  @@index([orgId])
+}
+
+enum MaintenancePayer {
+  OWNER
+  TENANT
+}
+
+enum KitchenType {
+  OPEN
+  CLOSED
+}
+
+enum FurnishedStatus {
+  UNFURNISHED
+  SEMI_FURNISHED
+  FULLY_FURNISHED
+}
+
+enum PaymentFrequency {
+  MONTHLY
+  QUARTERLY
+  SEMI_ANNUAL
+}
+
+enum UnitSizeUnit {
+  SQ_FT
+  SQ_M
 }
 
 enum BuildingAssignmentType {

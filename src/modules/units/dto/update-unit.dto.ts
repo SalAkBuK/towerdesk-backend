@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   FurnishedStatus,
   KitchenType,
@@ -20,19 +20,20 @@ import {
   MinLength,
 } from 'class-validator';
 
-export class CreateUnitDto {
-  @ApiProperty({ example: 'A-101' })
+export class UpdateUnitDto {
+  @ApiPropertyOptional({ example: 'A-101' })
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  label!: string;
+  label?: string;
 
-  @ApiProperty({ required: false, example: 1 })
+  @ApiPropertyOptional({ example: 1 })
   @IsOptional()
   @IsInt()
   @Min(0)
   floor?: number;
 
-  @ApiProperty({ required: false, example: 'Near elevator' })
+  @ApiPropertyOptional({ example: 'Near elevator' })
   @IsOptional()
   @IsString()
   notes?: string;

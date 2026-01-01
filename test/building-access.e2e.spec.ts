@@ -71,6 +71,22 @@ type UnitRecord = {
   updatedAt: Date;
 };
 
+type BuildingAmenityRecord = {
+  id: string;
+  buildingId: string;
+  name: string;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type UnitAmenityRecord = {
+  unitId: string;
+  amenityId: string;
+  createdAt: Date;
+};
+
 type BuildingAssignmentRecord = {
   id: string;
   buildingId: string;
@@ -98,6 +114,8 @@ class InMemoryPrismaService {
   private orgs: OrgRecord[] = [];
   private users: UserRecord[] = [];
   private buildings: BuildingRecord[] = [];
+  private buildingAmenities: BuildingAmenityRecord[] = [];
+  private unitAmenities: UnitAmenityRecord[] = [];
   private units: UnitRecord[] = [];
   private assignments: BuildingAssignmentRecord[] = [];
   private occupancies: OccupancyRecord[] = [];
@@ -287,6 +305,9 @@ class InMemoryPrismaService {
         ) ?? null
       );
     },
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      return this.units.find((unit) => unit.id === where.id) ?? null;
+    },
   };
 
   buildingAssignment = {
@@ -406,6 +427,59 @@ class InMemoryPrismaService {
     },
   };
 
+  buildingAmenity = {
+    findMany: async ({
+      where,
+      select,
+    }: {
+      where: { buildingId: string; isActive?: boolean; isDefault?: boolean; id?: { in: string[] } };
+      select?: { id?: boolean };
+    }) => {
+      const items = this.buildingAmenities.filter((amenity) => {
+        if (amenity.buildingId !== where.buildingId) return false;
+        if (where.isActive !== undefined && amenity.isActive !== where.isActive) return false;
+        if (where.isDefault !== undefined && amenity.isDefault !== where.isDefault) return false;
+        if (where.id?.in && !where.id.in.includes(amenity.id)) return false;
+        return true;
+      });
+      if (select?.id) {
+        return items.map((amenity) => ({ id: amenity.id }));
+      }
+      return items;
+    },
+  };
+
+  unitAmenity = {
+    createMany: async ({
+      data,
+    }: {
+      data: { unitId: string; amenityId: string }[];
+      skipDuplicates?: boolean;
+    }) => {
+      for (const entry of data) {
+        const exists = this.unitAmenities.some(
+          (link) => link.unitId === entry.unitId && link.amenityId === entry.amenityId,
+        );
+        if (exists) {
+          continue;
+        }
+        this.unitAmenities.push({
+          unitId: entry.unitId,
+          amenityId: entry.amenityId,
+          createdAt: new Date(),
+        });
+      }
+      return { count: data.length };
+    },
+    deleteMany: async ({ where }: { where: { unitId: string } }) => {
+      const before = this.unitAmenities.length;
+      this.unitAmenities = this.unitAmenities.filter(
+        (link) => link.unitId !== where.unitId,
+      );
+      return { count: before - this.unitAmenities.length };
+    },
+  };
+
   async $transaction<T>(arg: ((tx: this) => Promise<T>) | Promise<T>[]) {
     if (Array.isArray(arg)) {
       return Promise.all(arg);
@@ -417,6 +491,8 @@ class InMemoryPrismaService {
     this.orgs = [];
     this.users = [];
     this.buildings = [];
+    this.buildingAmenities = [];
+    this.unitAmenities = [];
     this.units = [];
     this.assignments = [];
     this.occupancies = [];

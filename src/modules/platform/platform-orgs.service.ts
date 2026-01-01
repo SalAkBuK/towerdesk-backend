@@ -8,6 +8,7 @@ import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { CreateOrgAdminDto } from './dto/create-org-admin.dto';
+import { CreateOrgDto } from './dto/create-org.dto';
 
 @Injectable()
 export class PlatformOrgsService {
@@ -47,8 +48,22 @@ export class PlatformOrgsService {
     return this.prisma.org.findUnique({ where: { id: orgId } });
   }
 
-  create(name: string) {
-    return this.prisma.org.create({ data: { name } });
+  create(dto: CreateOrgDto) {
+    return this.prisma.org.create({
+      data: {
+        name: dto.name,
+        businessName: dto.businessName,
+        businessType: dto.businessType,
+        tradeLicenseNumber: dto.tradeLicenseNumber,
+        vatRegistrationNumber: dto.vatRegistrationNumber,
+        registeredOfficeAddress: dto.registeredOfficeAddress,
+        city: dto.city,
+        officePhoneNumber: dto.officePhoneNumber,
+        businessEmailAddress: dto.businessEmailAddress,
+        website: dto.website,
+        ownerName: dto.ownerName,
+      },
+    });
   }
 
   async createOrgAdmin(orgId: string, dto: CreateOrgAdminDto) {

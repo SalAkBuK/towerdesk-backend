@@ -6,6 +6,9 @@ import { HealthModule } from './modules/health/health.module';
 import { BuildingsModule } from './modules/buildings/buildings.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { UnitsModule } from './modules/units/units.module';
+import { UnitTypesModule } from './modules/unit-types/unit-types.module';
+import { OwnersModule } from './modules/owners/owners.module';
+import { BuildingAmenitiesModule } from './modules/building-amenities/building-amenities.module';
 import { BuildingAssignmentsModule } from './modules/building-assignments/building-assignments.module';
 import { OccupanciesModule } from './modules/occupancies/occupancies.module';
 import { ResidentsModule } from './modules/residents/residents.module';
@@ -44,6 +47,9 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     BuildingsModule,
     PlatformModule,
     UnitsModule,
+    UnitTypesModule,
+    OwnersModule,
+    BuildingAmenitiesModule,
     BuildingAssignmentsModule,
     OccupanciesModule,
     ResidentsModule,

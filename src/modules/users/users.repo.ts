@@ -10,9 +10,12 @@ export class UsersRepo {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
-  listByOrg(orgId: string): Promise<User[]> {
+  listByOrg(
+    orgId: string,
+  ): Promise<(User & { userRoles: { role: { key: string } }[] })[]> {
     return this.prisma.user.findMany({
       where: { orgId },
+      include: { userRoles: { include: { role: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }

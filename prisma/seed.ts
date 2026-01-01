@@ -32,6 +32,26 @@ const permissions = [
     description: 'Create/update units in a building',
   },
   {
+    key: 'unitTypes.read',
+    name: 'Read unit types',
+    description: 'View unit types in the org',
+  },
+  {
+    key: 'unitTypes.write',
+    name: 'Manage unit types',
+    description: 'Create/update unit types in the org',
+  },
+  {
+    key: 'owners.read',
+    name: 'Read owners',
+    description: 'View owners in the org',
+  },
+  {
+    key: 'owners.write',
+    name: 'Manage owners',
+    description: 'Create/update owners in the org',
+  },
+  {
     key: 'building.assignments.read',
     name: 'Read building assignments',
     description: 'View building assignments',
@@ -136,12 +156,16 @@ const rolePermissionMap: Record<string, string[]> = {
     'buildings.write',
     'units.read',
     'units.write',
+    'unitTypes.read',
+    'unitTypes.write',
     'building.assignments.read',
     'building.assignments.write',
     'occupancy.read',
     'occupancy.write',
     'residents.read',
     'residents.write',
+    'owners.read',
+    'owners.write',
     'requests.read',
     'requests.write',
     'requests.assign',
@@ -234,6 +258,17 @@ async function seedOrg() {
   }
 
   return prisma.org.create({ data: { name: 'Towerdesk Demo Org' } });
+}
+
+async function seedUnitTypes(orgId: string) {
+  const defaults = ['Apartment', 'Shop', 'Office', 'Other'];
+  for (const name of defaults) {
+    await prisma.unitType.upsert({
+      where: { orgId_name: { orgId, name } },
+      update: { isActive: true },
+      create: { orgId, name, isActive: true },
+    });
+  }
 }
 
 async function seedOrgAdmin(orgId: string) {
@@ -329,6 +364,7 @@ async function main() {
   await seedRolePermissions();
 
   const org = await seedOrg();
+  await seedUnitTypes(org.id);
   await seedOrgAdmin(org.id);
   await seedPlatformSuperadmin();
   await seedBuilding(org.id);

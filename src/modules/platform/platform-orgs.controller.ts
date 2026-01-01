@@ -19,7 +19,7 @@ export class PlatformOrgsController {
   @RequirePermissions('platform.org.create')
   @ApiOkResponse({ type: OrgResponseDto })
   async create(@Body() dto: CreateOrgDto) {
-    const org = await this.platformOrgsService.create(dto.name);
+    const org = await this.platformOrgsService.create(dto);
     return toOrgResponse(org);
   }
 

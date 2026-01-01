@@ -60,7 +60,23 @@ export class UsersService {
   async listInOrg(user: AuthenticatedUser | undefined) {
     const orgId = assertOrgScope(user);
     const users = await this.usersRepo.listByOrg(orgId);
-    return users.map((orgUser) => toUserResponse(orgUser));
+    const responses = [];
+    for (const orgUser of users) {
+      const embeddedRoles = (orgUser as { userRoles?: { role: { key: string } }[] })
+        .userRoles;
+      if (embeddedRoles) {
+        responses.push(
+          toUserResponse(
+            orgUser,
+            embeddedRoles.map((entry) => entry.role.key),
+          ),
+        );
+        continue;
+      }
+      const roleKeys = await this.usersRepo.getRoleKeys(orgUser.id);
+      responses.push(toUserResponse(orgUser, roleKeys));
+    }
+    return responses;
   }
 
   async updateProfile(id: string, data: { name?: string; avatarUrl?: string; phone?: string }) {

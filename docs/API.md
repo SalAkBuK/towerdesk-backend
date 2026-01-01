@@ -48,7 +48,22 @@ GET `/platform/orgs`
 - Requires `platform.org.read` when using JWT
 
 POST `/platform/orgs`
-- Body: `{ name }`
+- Body:
+  ```
+  {
+    "name": "Towerdesk Inc.",
+    "businessName": "Towerdesk Management LLC",
+    "businessType": "PROPERTY_MANAGEMENT",
+    "tradeLicenseNumber": "TL-12345",
+    "vatRegistrationNumber": "VAT-12345",
+    "registeredOfficeAddress": "123 Main St",
+    "city": "Dubai",
+    "officePhoneNumber": "+971-4-555-0100",
+    "businessEmailAddress": "info@towerdesk.com",
+    "website": "https://towerdesk.com",
+    "ownerName": "Jane Founder"
+  }
+  ```
 - Returns: `{ id, name, createdAt }`
 
 GET `/platform/orgs/:orgId/admins`
@@ -98,6 +113,7 @@ POST `/users`
 GET `/org/users`
 - Requires `users.read`
 - Returns all users in the caller's org
+- Response includes `roleKeys` (org roles) for each user
 - Example:
   ```
   fetch(`${baseUrl}/org/users`, {
@@ -194,13 +210,81 @@ GET `/org/buildings/:buildingId`
 ## Units (building-scoped)
 
 POST `/org/buildings/:buildingId/units`
-- Body: `{ label, floor?, notes? }`
+- Body:
+  ```
+  {
+    "label": "A-101",
+    "floor": 1,
+    "notes": "Near elevator",
+    "unitTypeId": "uuid",
+    "ownerId": "uuid",
+    "maintenancePayer": "OWNER",
+    "unitSize": 950,
+    "unitSizeUnit": "SQ_FT",
+    "bedrooms": 2,
+    "bathrooms": 2,
+    "balcony": true,
+    "kitchenType": "OPEN",
+    "furnishedStatus": "FULLY_FURNISHED",
+    "rentAnnual": 120000,
+    "paymentFrequency": "MONTHLY",
+    "securityDepositAmount": 5000,
+    "serviceChargePerUnit": 1500,
+    "vatApplicable": true,
+    "electricityMeterNumber": "ELEC-123",
+    "waterMeterNumber": "WATER-456",
+    "gasMeterNumber": "GAS-789",
+    "amenityIds": ["uuid"]
+  }
+  ```
 - Requires `units.write`
 - Building managers assigned to the building can create units.
 
 GET `/org/buildings/:buildingId/units`
 - Query: `available=true` (optional)
 - Requires `units.read`
+- Returns minimal unit fields (full details available via unit detail endpoint)
+
+GET `/org/buildings/:buildingId/units/:unitId`
+- Requires `units.read`
+- Returns full unit record including new fields
+  - Example:
+    ```
+    {
+      "id": "uuid",
+      "buildingId": "uuid",
+      "label": "A-101",
+      "unitTypeId": "uuid",
+      "ownerId": "uuid",
+      "maintenancePayer": "OWNER",
+      "floor": 1,
+      "notes": "Near elevator",
+      "unitSize": "950",
+      "unitSizeUnit": "SQ_FT",
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "balcony": true,
+      "kitchenType": "OPEN",
+      "furnishedStatus": "FULLY_FURNISHED",
+      "rentAnnual": "120000",
+      "paymentFrequency": "MONTHLY",
+      "securityDepositAmount": "5000",
+      "serviceChargePerUnit": "1500",
+      "vatApplicable": true,
+      "electricityMeterNumber": "ELEC-123",
+      "waterMeterNumber": "WATER-456",
+      "gasMeterNumber": "GAS-789",
+      "amenityIds": ["uuid"],
+      "amenities": [{ "id": "uuid", "name": "Balcony" }],
+      "createdAt": "2025-12-25T19:40:44.583Z",
+      "updatedAt": "2025-12-25T19:40:44.583Z"
+    }
+    ```
+
+PATCH `/org/buildings/:buildingId/units/:unitId`
+- Body: same optional fields as create
+- Requires `units.write`
+ - Returns: same as unit detail
 
 GET `/org/buildings/:buildingId/units/basic`
 - Resident-safe list (id + label only)
@@ -209,6 +293,45 @@ GET `/org/buildings/:buildingId/units/basic`
 GET `/org/buildings/:buildingId/units/count`
 - Returns `{ total: number, vacant: number }`
 - Requires `units.read`
+
+## Building Amenities (building-scoped)
+
+GET `/org/buildings/:buildingId/amenities`
+- Returns list of amenities for the building
+- Requires `buildings.read`
+
+POST `/org/buildings/:buildingId/amenities`
+- Body: `{ name, isDefault?, isActive? }`
+- Requires `buildings.write`
+
+PATCH `/org/buildings/:buildingId/amenities/:amenityId`
+- Body: `{ name?, isDefault?, isActive? }`
+- Requires `buildings.write`
+
+Amenity defaults for unit creation:
+- If `amenityIds` is omitted, defaults are auto-assigned from active amenities with `isDefault=true`.
+- If `amenityIds: []`, no amenities are assigned.
+
+## Unit Types (org-scoped)
+
+GET `/org/unit-types`
+- Returns active unit types
+- Requires `unitTypes.read`
+
+POST `/org/unit-types`
+- Body: `{ name, isActive? }`
+- Requires `unitTypes.write`
+
+## Owners (org-scoped)
+
+GET `/org/owners`
+- Query: `search` (optional)
+- Returns owners in the org
+- Requires `owners.read`
+
+POST `/org/owners`
+- Body: `{ name, email?, phone?, address? }`
+- Requires `owners.write`
 
 ## Building Assignments (building-scoped)
 
@@ -364,11 +487,27 @@ Notification `data` payload includes:
 ## Org Profile
 
 GET `/org/profile`
-- Returns `{ id, name, logoUrl }`
+- Returns `{ id, name, logoUrl, businessName?, businessType?, tradeLicenseNumber?, vatRegistrationNumber?, registeredOfficeAddress?, city?, officePhoneNumber?, businessEmailAddress?, website?, ownerName? }`
 - Any authenticated user in the org
 
 PATCH `/org/profile`
-- Body: `{ name?, logoUrl? }`
+- Body:
+  ```
+  {
+    "name": "Towerdesk Inc.",
+    "logoUrl": "https://example.com/logo.png",
+    "businessName": "Towerdesk Management LLC",
+    "businessType": "PROPERTY_MANAGEMENT",
+    "tradeLicenseNumber": "TL-12345",
+    "vatRegistrationNumber": "VAT-12345",
+    "registeredOfficeAddress": "123 Main St",
+    "city": "Dubai",
+    "officePhoneNumber": "+971-4-555-0100",
+    "businessEmailAddress": "info@towerdesk.com",
+    "website": "https://towerdesk.com",
+    "ownerName": "Jane Founder"
+  }
+  ```
 - Requires `org.profile.write`
 
 ## User Profile (self)
@@ -387,3 +526,14 @@ Cloudinary unsigned upload (frontend):
 - 403: org scope missing or insufficient permissions (in-org)
 - 404: cross-org resource not found
 - 409: conflict (e.g., unit already occupied, duplicate)
+
+## Frontend integration checklist
+- Use `GET /org/unit-types` (org-scoped) for unit type dropdowns.
+- Use `GET /org/owners` (org-scoped) for owner dropdowns/search.
+- Use `GET /org/buildings/:buildingId/amenities` (building-scoped) for amenity options.
+- `POST /org/buildings/:buildingId/units` accepts `amenityIds`.
+  - Omit `amenityIds` to auto-apply active defaults (`isDefault=true`).
+  - Send `amenityIds: []` to intentionally assign none.
+- `GET /org/buildings/:buildingId/units/:unitId` returns `amenityIds` and `amenities`.
+- Unit list and `/basic` remain minimal (no amenities).
+- Decimal fields in unit responses are strings (`"120000"`), not numbers.

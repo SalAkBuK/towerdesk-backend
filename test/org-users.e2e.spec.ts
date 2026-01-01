@@ -113,6 +113,22 @@ class InMemoryPrismaService {
   };
 
   userRole = {
+    findMany: async ({
+      where,
+      include,
+    }: {
+      where: { userId: string };
+      include?: { role?: boolean };
+    }) => {
+      const records = this.userRoles.filter((entry) => entry.userId === where.userId);
+      if (!include?.role) {
+        return records;
+      }
+      return records.map((entry) => ({
+        ...entry,
+        role: this.roles.find((role) => role.id === entry.roleId) ?? null,
+      }));
+    },
     createMany: async ({
       data,
     }: {

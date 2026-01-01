@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OrgScopeGuard } from '../../common/guards/org-scope.guard';
@@ -11,6 +11,8 @@ import { CreateUnitDto } from './dto/create-unit.dto';
 import { ListUnitsQueryDto } from './dto/list-units.query.dto';
 import { UnitResponseDto, toUnitResponse } from './dto/unit.response.dto';
 import { UnitBasicResponseDto, toUnitBasicResponse } from './dto/unit-basic.response.dto';
+import { UnitDetailResponseDto, toUnitDetailResponse } from './dto/unit-detail.response.dto';
+import { UpdateUnitDto } from './dto/update-unit.dto';
 import { UnitsService } from './units.service';
 
 @ApiTags('org-units')
@@ -75,5 +77,32 @@ export class UnitsController {
     @Param('buildingId') buildingId: string,
   ) {
     return this.unitsService.countVacant(user, buildingId);
+  }
+
+  @Get(':unitId')
+  @BuildingReadAccess()
+  @RequirePermissions('units.read')
+  @ApiOkResponse({ type: UnitDetailResponseDto })
+  async getById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('buildingId') buildingId: string,
+    @Param('unitId') unitId: string,
+  ) {
+    const unit = await this.unitsService.findById(user, buildingId, unitId);
+    return toUnitDetailResponse(unit);
+  }
+
+  @Patch(':unitId')
+  @BuildingWriteAccess(true)
+  @RequirePermissions('units.write')
+  @ApiOkResponse({ type: UnitDetailResponseDto })
+  async update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('buildingId') buildingId: string,
+    @Param('unitId') unitId: string,
+    @Body() dto: UpdateUnitDto,
+  ) {
+    const unit = await this.unitsService.update(user, buildingId, unitId, dto);
+    return toUnitDetailResponse(unit);
   }
 }
