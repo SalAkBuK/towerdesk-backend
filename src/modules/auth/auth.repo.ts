@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service';
-import { Prisma, User } from '@prisma/client';
+import { BuildingAssignmentType, Prisma, User } from '@prisma/client';
 
 @Injectable()
 export class AuthRepo {
@@ -41,5 +41,31 @@ export class AuthRepo {
       include: { role: true },
     });
     return roles.map((entry) => entry.role.key);
+  }
+
+  async getHighestBuildingAssignmentType(
+    userId: string,
+  ): Promise<BuildingAssignmentType | null> {
+    const assignments = await this.prisma.buildingAssignment.findMany({
+      where: { userId },
+      select: { type: true },
+    });
+    if (assignments.length === 0) {
+      return null;
+    }
+
+    const priority: BuildingAssignmentType[] = [
+      BuildingAssignmentType.BUILDING_ADMIN,
+      BuildingAssignmentType.MANAGER,
+      BuildingAssignmentType.STAFF,
+    ];
+
+    for (const type of priority) {
+      if (assignments.some((assignment) => assignment.type === type)) {
+        return type;
+      }
+    }
+
+    return null;
   }
 }

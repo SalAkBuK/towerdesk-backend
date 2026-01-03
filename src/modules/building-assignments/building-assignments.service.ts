@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BuildingAssignmentType, Prisma } from '@prisma/client';
 import { AuthenticatedUser } from '../../common/types/request-context';
 import { assertOrgScope } from '../../common/utils/org-scope';
+import { PrismaService } from '../../infra/prisma/prisma.service';
 import { BuildingsRepo } from '../buildings/buildings.repo';
 import { UsersRepo } from '../users/users.repo';
 import { CreateBuildingAssignmentDto } from './dto/create-building-assignment.dto';
@@ -18,6 +19,7 @@ export class BuildingAssignmentsService {
     private readonly buildingsRepo: BuildingsRepo,
     private readonly usersRepo: UsersRepo,
     private readonly assignmentsRepo: BuildingAssignmentsRepo,
+    private readonly prisma: PrismaService,
   ) {}
 
   async create(
@@ -37,11 +39,16 @@ export class BuildingAssignmentsService {
     }
 
     try {
-      return await this.assignmentsRepo.create(
+      const assignment = await this.assignmentsRepo.create(
         buildingId,
         targetUser.id,
         dto.type,
       );
+      await this.ensureAdminRoleForBuildingAdminAssignment(
+        targetUser.id,
+        dto.type,
+      );
+      return assignment;
     } catch (error: unknown) {
       const code =
         error instanceof Prisma.PrismaClientKnownRequestError
@@ -64,5 +71,26 @@ export class BuildingAssignmentsService {
     }
 
     return this.assignmentsRepo.listByBuilding(buildingId);
+  }
+
+  private async ensureAdminRoleForBuildingAdminAssignment(
+    userId: string,
+    type: BuildingAssignmentType,
+  ) {
+    if (type !== BuildingAssignmentType.BUILDING_ADMIN) {
+      return;
+    }
+
+    const adminRole = await this.prisma.role.findUnique({
+      where: { key: 'admin' },
+    });
+    if (!adminRole) {
+      throw new BadRequestException('admin role not configured');
+    }
+
+    await this.prisma.userRole.createMany({
+      data: [{ userId, roleId: adminRole.id }],
+      skipDuplicates: true,
+    });
   }
 }

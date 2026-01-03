@@ -173,7 +173,7 @@ const rolePermissionMap: Record<string, string[]> = {
     'requests.comment',
     'org.profile.write',
   ],
-  admin: ['users.read', 'users.write', 'roles.read'],
+  admin: ['users.read', 'users.write', 'roles.read', 'unitTypes.read', 'owners.read'],
   viewer: ['users.read', 'roles.read'],
   resident: [],
   platform_superadmin: [

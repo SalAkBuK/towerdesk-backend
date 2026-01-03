@@ -31,6 +31,9 @@ export class UserResponseDto {
   @ApiProperty()
   updatedAt!: Date;
 
+  @ApiProperty({ required: false })
+  role?: string | null;
+
   @ApiProperty({ required: false, type: [String] })
   roleKeys?: string[];
 }
@@ -51,6 +54,7 @@ type UserRecord = {
 export const toUserResponse = (
   user: UserRecord,
   roleKeys?: string[],
+  role?: string | null,
 ): UserResponseDto => ({
   id: user.id,
   email: user.email,
@@ -62,5 +66,6 @@ export const toUserResponse = (
   mustChangePassword: user.mustChangePassword,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
+  role,
   roleKeys,
 });

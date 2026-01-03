@@ -136,6 +136,11 @@ export class OrgUsersProvisionService {
         targetUser.id,
         buildingAssignments,
       );
+      await this.ensureAdminRoleForBuildingAdmins(
+        tx,
+        targetUser.id,
+        buildingAssignments,
+      );
       const appliedResident = await this.applyResidentGrant(
         tx,
         orgId,
@@ -314,6 +319,29 @@ export class OrgUsersProvisionService {
     }
 
     return applied;
+  }
+
+  private async ensureAdminRoleForBuildingAdmins(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    assignments: BuildingAssignmentGrantDto[],
+  ) {
+    const hasBuildingAdmin = assignments.some(
+      (assignment) => assignment.type === BuildingAssignmentType.BUILDING_ADMIN,
+    );
+    if (!hasBuildingAdmin) {
+      return;
+    }
+
+    const adminRole = await tx.role.findUnique({ where: { key: 'admin' } });
+    if (!adminRole) {
+      throw new BadRequestException('admin role not configured');
+    }
+
+    await tx.userRole.createMany({
+      data: [{ userId, roleId: adminRole.id }],
+      skipDuplicates: true,
+    });
   }
 
   private async applyResidentGrant(

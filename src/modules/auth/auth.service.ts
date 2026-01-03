@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { BuildingAssignmentType, User } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { env } from '../../config/env';
 import { AuthRepo } from './auth.repo';
@@ -37,10 +37,13 @@ export class AuthService {
     const tokens = await this.issueTokens(user);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
     const roleKeys = await this.authRepo.getRoleKeys(user.id);
+    const assignmentType =
+      await this.authRepo.getHighestBuildingAssignmentType(user.id);
+    const role = this.deriveUserRole(roleKeys, assignmentType);
 
     return {
       ...tokens,
-      user: toUserResponse(user, roleKeys),
+      user: toUserResponse(user, roleKeys, role),
     };
   }
 
@@ -58,10 +61,13 @@ export class AuthService {
     const tokens = await this.issueTokens(user);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
     const roleKeys = await this.authRepo.getRoleKeys(user.id);
+    const assignmentType =
+      await this.authRepo.getHighestBuildingAssignmentType(user.id);
+    const role = this.deriveUserRole(roleKeys, assignmentType);
 
     return {
       ...tokens,
-      user: toUserResponse(user, roleKeys),
+      user: toUserResponse(user, roleKeys, role),
     };
   }
 
@@ -79,10 +85,13 @@ export class AuthService {
     const tokens = await this.issueTokens(user);
     await this.saveRefreshToken(user.id, tokens.refreshToken);
     const roleKeys = await this.authRepo.getRoleKeys(user.id);
+    const assignmentType =
+      await this.authRepo.getHighestBuildingAssignmentType(user.id);
+    const role = this.deriveUserRole(roleKeys, assignmentType);
 
     return {
       ...tokens,
-      user: toUserResponse(user, roleKeys),
+      user: toUserResponse(user, roleKeys, role),
     };
   }
 
@@ -130,5 +139,40 @@ export class AuthService {
   private async saveRefreshToken(userId: string, refreshToken: string) {
     const refreshTokenHash = await argon2.hash(refreshToken);
     await this.authRepo.updateRefreshTokenHash(userId, refreshTokenHash);
+  }
+
+  private deriveUserRole(
+    roleKeys: string[],
+    assignmentType: BuildingAssignmentType | null,
+  ) {
+    const priority = [
+      'platform_superadmin',
+      'super_admin',
+      'org_admin',
+      'admin',
+      'viewer',
+      'resident',
+    ];
+    for (const key of priority) {
+      if (roleKeys.includes(key)) {
+        return key;
+      }
+    }
+
+    if (!assignmentType) {
+      return null;
+    }
+
+    if (assignmentType === BuildingAssignmentType.BUILDING_ADMIN) {
+      return 'admin';
+    }
+    if (assignmentType === BuildingAssignmentType.MANAGER) {
+      return 'manager';
+    }
+    if (assignmentType === BuildingAssignmentType.STAFF) {
+      return 'staff';
+    }
+
+    return null;
   }
 }
